@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.cpython-*.pyc
+
+# Environment & Dependencies
+_internal/
+pyz_extracted/
+pyc_dump/
+extracted/
+backup_original/
+.codex/
+
+# AI Models & Large Binaries (Download via download_models.bat or download_all_models.py)
+models/
+*.onnx
+*.bin
+*.pth
+*.pt
+
+# User & Temporary Data
+Data/
+Logs/
+*.log
+error_run.txt
+unins000.exe
+unins000.dat
+
+# System & Editor files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.tmp
