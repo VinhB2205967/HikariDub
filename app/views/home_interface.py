@@ -103,19 +103,18 @@ def _init_patched(self, parent=None):
             
         # Optimize Video Workspace & Canvas
         if hasattr(self, 'video_frame'):
-            self.video_frame.setMinimumHeight(380)
+            self.video_frame.setMinimumHeight(400)
             self.video_frame.setStyleSheet("""
-                background-color: #07090E;
-                border: 1px dashed #1E2533;
-                border-radius: 10px;
+                background: transparent;
+                border: none;
             """)
             if self.video_frame.layout():
                 self.video_frame.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
         if hasattr(self, 'video_canvas'):
             self.video_canvas.setStyleSheet("""
                 background-color: #000000;
-                border: 2px solid #22D3EE;
-                border-radius: 6px;
+                border: 1px solid #293244;
+                border-radius: 8px;
             """)
             # Default subtitle position to lower third so character's face remains clear
             if getattr(self.video_canvas, 'sub_rel_y', 0.5) <= 0.65:
@@ -485,24 +484,23 @@ def _setup_video_canvas_transform(self):
 
     vc._canvas_transform = self._canvas_controls.get_transform()
 
-    # Workspace setup
+    # Workspace setup - completely transparent container so ONLY the Canvas itself is the black box
     vf.setStyleSheet("""
-        background-color: #07090E;
-        border: 1px dashed #1E2533;
-        border-radius: 10px;
+        background: transparent;
+        border: none;
     """)
     if vf.layout():
         vf.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     vc.setStyleSheet("""
         background-color: #000000;
-        border: 2px solid #22D3EE;
-        border-radius: 6px;
+        border: 1px solid #293244;
+        border-radius: 8px;
     """)
 
     def recalc_and_apply_canvas_size():
         t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
-        pad = 16
+        pad = 8
         avail_w = max(100, vf.width() - pad * 2)
         avail_h = max(100, vf.height() - pad * 2)
         if avail_h < 300:
@@ -587,48 +585,11 @@ def _setup_video_canvas_transform(self):
                     p.drawImage(QRectF(vx, vy, vw, vh), vc.current_image)
                 p.restore()
 
-            # 3. Canvas Border (Crisp Cyan #22D3EE around the Canvas edges)
-            pen_border = QPen(QColor("#22D3EE"), 2, Qt.PenStyle.SolidLine)
+            # 3. Canvas Outer Border (Clean subtle dark border around the Canvas)
+            pen_border = QPen(QColor("#293244"), 1, Qt.PenStyle.SolidLine)
             p.setPen(pen_border)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(QRectF(0.5, 0.5, W - 1.0, H - 1.0))
-
-            # 4. Corner accents
-            c_len = 14.0
-            pen_corner = QPen(QColor("#38BDF8"), 3)
-            p.setPen(pen_corner)
-            p.drawLine(QPointF(0, 0), QPointF(c_len, 0))
-            p.drawLine(QPointF(0, 0), QPointF(0, c_len))
-            p.drawLine(QPointF(W, 0), QPointF(W - c_len, 0))
-            p.drawLine(QPointF(W, 0), QPointF(W, c_len))
-            p.drawLine(QPointF(0, H), QPointF(c_len, H))
-            p.drawLine(QPointF(0, H), QPointF(0, H - c_len))
-            p.drawLine(QPointF(W, H), QPointF(W - c_len, H))
-            p.drawLine(QPointF(W, H), QPointF(W, H - c_len))
-
-            # 5. Center Crosshair
-            center_x = W / 2.0
-            center_y = H / 2.0
-            cross_sz = 8.0
-            pen_cross = QPen(QColor(34, 211, 238, 140), 1, Qt.PenStyle.DotLine)
-            p.setPen(pen_cross)
-            p.drawLine(QPointF(center_x - cross_sz, center_y), QPointF(center_x + cross_sz, center_y))
-            p.drawLine(QPointF(center_x, center_y - cross_sz), QPointF(center_x, center_y + cross_sz))
-
-            # 6. Canvas Aspect Ratio Badge (Top-left inside canvas)
-            if t:
-                badge_h = 22.0
-                badge_w = 140.0
-                badge_rect = QRectF(6, 6, badge_w, badge_h)
-                p.fillRect(badge_rect, QColor(15, 18, 25, 220))
-                p.setPen(QPen(QColor(34, 211, 238, 90), 1))
-                p.drawRect(badge_rect)
-
-                p.setPen(QPen(QColor("#22D3EE")))
-                p.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
-                ratio_name = t.aspect_ratio.upper()
-                badge_text = f" {ratio_name}  {t.canvas_w}×{t.canvas_h}"
-                p.drawText(badge_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, badge_text)
 
         finally:
             p.end()
