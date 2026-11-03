@@ -101,20 +101,25 @@ def _init_patched(self, parent=None):
         if hasattr(self, 'row2_widget'):
             self.row2_widget.setFixedHeight(120)
             
-        # Optimize Video Canvas & Video Frame
+        # Optimize Video Workspace & Canvas
         if hasattr(self, 'video_frame'):
             self.video_frame.setMinimumHeight(380)
             self.video_frame.setStyleSheet("""
-                background-color: #05070B;
-                border: 1px solid #293244;
-                border-radius: 8px;
+                background-color: #07090E;
+                border: 1px dashed #1E2533;
+                border-radius: 10px;
             """)
+            if self.video_frame.layout():
+                self.video_frame.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
         if hasattr(self, 'video_canvas'):
-            self.video_canvas.setMinimumHeight(380)
+            self.video_canvas.setStyleSheet("""
+                background-color: #000000;
+                border: 2px solid #22D3EE;
+                border-radius: 6px;
+            """)
             # Default subtitle position to lower third so character's face remains clear
             if getattr(self.video_canvas, 'sub_rel_y', 0.5) <= 0.65:
                 self.video_canvas.sub_rel_y = 0.88
-            # Patch mousePressEvent to allow deselecting overlay items by clicking outside
             _orig_vc_press = self.video_canvas.mousePressEvent
             def _enhanced_vc_mouse_press(e):
                 _orig_vc_press(e)
@@ -466,11 +471,12 @@ HomeInterface.__init__ = _init_canvas_controls
 
 def _setup_video_canvas_transform(self):
     """
-    Patches self.video_canvas to render the selected aspect ratio Canvas,
-    support real-time scaling/panning/rotation, mouse drag, and wheel zoom.
+    Patches self.video_canvas to physically resize to the chosen Aspect Ratio,
+    center inside video_frame workspace, and render video clipped to Canvas.
     """
     vc = getattr(self, 'video_canvas', None)
-    if not vc:
+    vf = getattr(self, 'video_frame', None)
+    if not vc or not vf:
         return
 
     from PyQt6.QtGui import QPainter, QColor, QPen, QFont
@@ -479,79 +485,100 @@ def _setup_video_canvas_transform(self):
 
     vc._canvas_transform = self._canvas_controls.get_transform()
 
-    def get_canvas_rect():
+    # Workspace setup
+    vf.setStyleSheet("""
+        background-color: #07090E;
+        border: 1px dashed #1E2533;
+        border-radius: 10px;
+    """)
+    if vf.layout():
+        vf.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    vc.setStyleSheet("""
+        background-color: #000000;
+        border: 2px solid #22D3EE;
+        border-radius: 6px;
+    """)
+
+    def recalc_and_apply_canvas_size():
         t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
-        W = float(vc.width()) if vc.width() > 0 else 800.0
-        H = float(vc.height()) if vc.height() > 0 else 450.0
-        cw = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
-        ch = float(t.canvas_h) if t.canvas_h > 0 else 1080.0
-        ar = cw / ch
+        pad = 16
+        avail_w = max(100, vf.width() - pad * 2)
+        avail_h = max(100, vf.height() - pad * 2)
+        if avail_h < 300:
+            avail_h = 380
 
-        margin = 0.94
-        if (W / H) > ar:
-            canvas_h = H * margin
-            canvas_w = canvas_h * ar
+        cw_nom = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
+        ch_nom = float(t.canvas_h) if t.canvas_h > 0 else 1080.0
+        ar = cw_nom / ch_nom
+
+        if (avail_w / float(avail_h)) > ar:
+            ch_disp = avail_h
+            cw_disp = ch_disp * ar
         else:
-            canvas_w = W * margin
-            canvas_h = canvas_w / ar
+            cw_disp = avail_w
+            ch_disp = cw_disp / ar
 
-        canvas_x = (W - canvas_w) / 2.0
-        canvas_y = (H - canvas_h) / 2.0
-        return (canvas_x, canvas_y, canvas_w, canvas_h)
+        w_int = max(50, int(round(cw_disp)))
+        h_int = max(50, int(round(ch_disp)))
+        vc.setFixedSize(w_int, h_int)
+        vc.update()
+
+    self.recalc_and_apply_canvas_size = recalc_and_apply_canvas_size
+
+    # Hook vf.resizeEvent so canvas size adjusts on window resize
+    orig_vf_resize = vf.resizeEvent
+    def patched_vf_resize(event):
+        orig_vf_resize(event)
+        recalc_and_apply_canvas_size()
+    vf.resizeEvent = patched_vf_resize
 
     def get_video_rect():
         t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
-        cx, cy, cw, ch = get_canvas_rect()
+        W = float(vc.width())
+        H = float(vc.height())
 
-        nvw = float(getattr(vc, 'native_vw', 0))
-        nvh = float(getattr(vc, 'native_vh', 0))
-        if nvw <= 0: nvw = 1920.0
-        if nvh <= 0: nvh = 1080.0
+        nvw = float(getattr(vc, 'native_vw', 0)) or 1920.0
+        nvh = float(getattr(vc, 'native_vh', 0)) or 1080.0
 
-        fit_ratio = min(cw / nvw, ch / nvh)
+        fit_ratio = min(W / nvw, H / nvh)
         scale = max(0.05, float(getattr(t, 'video_scale', 1.0)))
         vw = nvw * fit_ratio * scale
         vh = nvh * fit_ratio * scale
 
         cw_nominal = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
-        screen_scale = cw / cw_nominal
+        screen_scale = W / cw_nominal
         off_x = float(getattr(t, 'pos_x', 0.0)) * screen_scale
         off_y = float(getattr(t, 'pos_y', 0.0)) * screen_scale
 
-        vx = cx + (cw - vw) / 2.0 + off_x
-        vy = cy + (ch - vh) / 2.0 + off_y
+        vx = (W - vw) / 2.0 + off_x
+        vy = (H - vh) / 2.0 + off_y
         return (vx, vy, vw, vh)
 
-    vc.get_canvas_rect = get_canvas_rect
     vc.get_video_rect = get_video_rect
-    vc._getVideoRect = get_canvas_rect  # Overlay items (subtitles, watermark) anchor to Canvas!
+    vc._getVideoRect = lambda: (0.0, 0.0, float(vc.width()), float(vc.height()))
 
     # ── Wrap paintEvent ───────────────────────────────────────────────────────
     orig_paintEvent = vc.paintEvent
 
     def patched_paintEvent(event):
-        cx, cy, cw, ch = get_canvas_rect()
+        W = float(vc.width())
+        H = float(vc.height())
         vx, vy, vw, vh = get_video_rect()
-        canvas_rect = QRectF(cx, cy, cw, ch)
 
         p = QPainter(vc)
         try:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            W = float(vc.width())
-            H = float(vc.height())
 
-            # 1. Fill entire widget background with dark workspace color
-            p.fillRect(0, 0, int(W), int(H), QColor("#080A10"))
+            # 1. Fill Canvas area with deep true black
+            p.fillRect(0, 0, int(W), int(H), QColor("#000000"))
 
-            # 2. Fill Canvas area with deep true black
-            p.fillRect(canvas_rect, QColor("#000000"))
-
-            # 3. Draw video strictly clipped to Canvas
+            # 2. Draw video strictly clipped to Canvas (overflow hidden)
             t = getattr(vc, '_canvas_transform', None)
             if vc.current_image and not vc.current_image.isNull():
                 p.save()
-                p.setClipRect(canvas_rect)  # Strict clipping/overflow hidden
+                p.setClipRect(0, 0, int(W), int(H))
                 if t and abs(getattr(t, 'rotation', 0.0)) > 0.01:
                     p.translate(vx + vw / 2.0, vy + vh / 2.0)
                     p.rotate(t.rotation)
@@ -560,39 +587,39 @@ def _setup_video_canvas_transform(self):
                     p.drawImage(QRectF(vx, vy, vw, vh), vc.current_image)
                 p.restore()
 
-            # 4. Canvas Border (Crisp Cyan #22D3EE)
+            # 3. Canvas Border (Crisp Cyan #22D3EE around the Canvas edges)
             pen_border = QPen(QColor("#22D3EE"), 2, Qt.PenStyle.SolidLine)
             p.setPen(pen_border)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(canvas_rect)
+            p.drawRect(QRectF(0.5, 0.5, W - 1.0, H - 1.0))
 
-            # 5. Corner accents
+            # 4. Corner accents
             c_len = 14.0
             pen_corner = QPen(QColor("#38BDF8"), 3)
             p.setPen(pen_corner)
-            p.drawLine(QPointF(cx, cy), QPointF(cx + c_len, cy))
-            p.drawLine(QPointF(cx, cy), QPointF(cx, cy + c_len))
-            p.drawLine(QPointF(cx + cw, cy), QPointF(cx + cw - c_len, cy))
-            p.drawLine(QPointF(cx + cw, cy), QPointF(cx + cw, cy + c_len))
-            p.drawLine(QPointF(cx, cy + ch), QPointF(cx + c_len, cy + ch))
-            p.drawLine(QPointF(cx, cy + ch), QPointF(cx, cy + ch - c_len))
-            p.drawLine(QPointF(cx + cw, cy + ch), QPointF(cx + cw - c_len, cy + ch))
-            p.drawLine(QPointF(cx + cw, cy + ch), QPointF(cx + cw, cy + ch - c_len))
+            p.drawLine(QPointF(0, 0), QPointF(c_len, 0))
+            p.drawLine(QPointF(0, 0), QPointF(0, c_len))
+            p.drawLine(QPointF(W, 0), QPointF(W - c_len, 0))
+            p.drawLine(QPointF(W, 0), QPointF(W, c_len))
+            p.drawLine(QPointF(0, H), QPointF(c_len, H))
+            p.drawLine(QPointF(0, H), QPointF(0, H - c_len))
+            p.drawLine(QPointF(W, H), QPointF(W - c_len, H))
+            p.drawLine(QPointF(W, H), QPointF(W, H - c_len))
 
-            # 6. Center Crosshair
-            center_x = cx + cw / 2.0
-            center_y = cy + ch / 2.0
+            # 5. Center Crosshair
+            center_x = W / 2.0
+            center_y = H / 2.0
             cross_sz = 8.0
             pen_cross = QPen(QColor(34, 211, 238, 140), 1, Qt.PenStyle.DotLine)
             p.setPen(pen_cross)
             p.drawLine(QPointF(center_x - cross_sz, center_y), QPointF(center_x + cross_sz, center_y))
             p.drawLine(QPointF(center_x, center_y - cross_sz), QPointF(center_x, center_y + cross_sz))
 
-            # 7. Canvas Aspect Ratio Badge (Top-left inside canvas)
+            # 6. Canvas Aspect Ratio Badge (Top-left inside canvas)
             if t:
                 badge_h = 22.0
                 badge_w = 140.0
-                badge_rect = QRectF(cx + 6, cy + 6, badge_w, badge_h)
+                badge_rect = QRectF(6, 6, badge_w, badge_h)
                 p.fillRect(badge_rect, QColor(15, 18, 25, 220))
                 p.setPen(QPen(QColor(34, 211, 238, 90), 1))
                 p.drawRect(badge_rect)
@@ -606,7 +633,7 @@ def _setup_video_canvas_transform(self):
         finally:
             p.end()
 
-        # 8. Draw overlay elements (subtitles, watermark, masks, logo) on the Canvas
+        # 7. Draw overlay elements (subtitles, watermark, masks, logo) on the Canvas
         saved_img = vc.current_image
         vc.current_image = None
         try:
@@ -641,10 +668,10 @@ def _setup_video_canvas_transform(self):
             dy = cur_pos.y() - _drag_state['pos'].y()
             _drag_state['pos'] = cur_pos
 
-            cx, cy, cw_drawn, ch_drawn = get_canvas_rect()
+            W = float(vc.width())
             t = getattr(vc, '_canvas_transform', None)
-            if t and cw_drawn > 0:
-                scale_to_screen = cw_drawn / float(t.canvas_w)
+            if t and W > 0:
+                scale_to_screen = W / float(t.canvas_w)
                 dx_canvas = dx / scale_to_screen
                 dy_canvas = dy / scale_to_screen
                 if hasattr(_self, '_canvas_controls'):
@@ -670,6 +697,9 @@ def _setup_video_canvas_transform(self):
     vc.mouseReleaseEvent = patched_mouseRelease
     vc.wheelEvent = patched_wheel
 
+    # Initial sizing
+    recalc_and_apply_canvas_size()
+
 HomeInterface._setup_video_canvas_transform = _setup_video_canvas_transform
 
 
@@ -683,7 +713,10 @@ def _on_canvas_transform_changed(self, transform):
         self._current_canvas_transform = transform
         if hasattr(self, 'video_canvas') and self.video_canvas:
             self.video_canvas._canvas_transform = transform
-            self.video_canvas.update()
+            if hasattr(self, 'recalc_and_apply_canvas_size'):
+                self.recalc_and_apply_canvas_size()
+            else:
+                self.video_canvas.update()
 
         # Log major ratio changes
         ratio_lbl = transform.aspect_ratio.upper()
