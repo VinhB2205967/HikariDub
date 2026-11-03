@@ -422,13 +422,12 @@ _orig_init_canvas = HomeInterface.__init__
 def _init_canvas_controls(self, parent=None):
     """
     Runs after _init_patched. Inserts CanvasControlsWidget above the video
-    preview area in col2 and wires all signals.
+    preview area in col2 and wires all signals and real-time canvas rendering.
     """
     _orig_init_canvas(self, parent)
     try:
         from PyQt6.QtWidgets import QVBoxLayout, QWidget
         from app.views.canvas_controls_widget import CanvasControlsWidget
-        from app.views.canvas_preview_widget import CanvasPreviewWidget
         from app.core.canvas_transform import CanvasTransform
 
         # Build the controls bar
@@ -445,7 +444,6 @@ def _init_canvas_controls(self, parent=None):
                 break
 
         if not inserted:
-            # Fallback: insert after the title label (index 1)
             self.col2_layout.insertWidget(1, self._canvas_controls)
 
         # ── Wire signals ──────────────────────────────────────────────────────
@@ -454,58 +452,8 @@ def _init_canvas_controls(self, parent=None):
         self._canvas_controls.fit_requested.connect(self._on_fit_requested)
         self._canvas_controls.reset_preview_zoom_requested.connect(self._on_reset_preview_zoom)
 
-        # Wire canvas preview widget signals back to controls (drag → position)
-        if hasattr(self, 'video_canvas'):
-            # Monkey-patch video_canvas to forward drag events to controls
-            _orig_vc_press2  = self.video_canvas.mousePressEvent
-            _orig_vc_move2   = self.video_canvas.mouseMoveEvent
-            _orig_vc_release2 = self.video_canvas.mouseReleaseEvent
-            _orig_vc_wheel2  = self.video_canvas.wheelEvent
-            _self = self
-
-            import math as _math
-            _drag_start = [None]
-
-            def _vc_press(e):
-                from PyQt6.QtCore import QPointF
-                from PyQt6.QtCore import Qt
-                if e.button() == Qt.MouseButton.LeftButton:
-                    _drag_start[0] = QPointF(e.position())
-                _orig_vc_press2(e)
-
-            def _vc_move(e):
-                from PyQt6.QtCore import QPointF
-                if _drag_start[0] is not None:
-                    pos = QPointF(e.position())
-                    dx = pos.x() - _drag_start[0].x()
-                    dy = pos.y() - _drag_start[0].y()
-                    _drag_start[0] = pos
-                    if hasattr(_self, '_canvas_controls'):
-                        _self._canvas_controls.update_pos_from_drag(dx, dy)
-                else:
-                    _orig_vc_move2(e)
-
-            def _vc_release(e):
-                from PyQt6.QtCore import Qt
-                if e.button() == Qt.MouseButton.LeftButton:
-                    _drag_start[0] = None
-                _orig_vc_release2(e)
-
-            def _vc_wheel(e):
-                delta = e.angleDelta().y()
-                if hasattr(_self, '_canvas_controls'):
-                    _self._canvas_controls.update_preview_zoom_from_scroll(delta)
-                else:
-                    _orig_vc_wheel2(e)
-                e.accept()
-
-            self.video_canvas.mousePressEvent  = _vc_press
-            self.video_canvas.mouseMoveEvent   = _vc_move
-            self.video_canvas.mouseReleaseEvent = _vc_release
-            try:
-                self.video_canvas.wheelEvent = _vc_wheel
-            except Exception:
-                pass
+        # ── Setup real-time Video Canvas rendering and interaction ────────────
+        self._setup_video_canvas_transform()
 
         # Kick off initial transform sync
         t = self._canvas_controls.get_transform()
@@ -518,19 +466,242 @@ def _init_canvas_controls(self, parent=None):
 HomeInterface.__init__ = _init_canvas_controls
 
 
+def _setup_video_canvas_transform(self):
+    """
+    Patches self.video_canvas to render the selected aspect ratio canvas,
+    support real-time scaling/panning/rotation, mouse drag, and wheel zoom.
+    """
+    vc = getattr(self, 'video_canvas', None)
+    if not vc:
+        return
+
+    from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+    from PyQt6.QtCore import QRectF, Qt, QPointF
+    from app.core.canvas_transform import CanvasTransform
+
+    vc._canvas_transform = self._canvas_controls.get_transform()
+
+    def get_canvas_rect():
+        t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
+        W = float(vc.width()) if vc.width() > 0 else 800.0
+        H = float(vc.height()) if vc.height() > 0 else 450.0
+        cw = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
+        ch = float(t.canvas_h) if t.canvas_h > 0 else 1080.0
+        ar = cw / ch
+
+        margin = 0.94
+        if (W / H) > ar:
+            ch_fit = H * margin
+            cw_fit = ch_fit * ar
+        else:
+            cw_fit = W * margin
+            ch_fit = cw_fit / ar
+
+        pz = max(0.1, min(3.0, getattr(t, 'preview_zoom', 1.0)))
+        cw_drawn = cw_fit * pz
+        ch_drawn = ch_fit * pz
+
+        cx = (W - cw_drawn) / 2.0
+        cy = (H - ch_drawn) / 2.0
+        return (cx, cy, cw_drawn, ch_drawn)
+
+    def patched_getVideoRect():
+        t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
+        cx, cy, cw_drawn, ch_drawn = get_canvas_rect()
+
+        nvw = float(getattr(vc, 'native_vw', 0))
+        nvh = float(getattr(vc, 'native_vh', 0))
+        if nvw <= 0: nvw = 1920.0
+        if nvh <= 0: nvh = 1080.0
+
+        fit_ratio = min(cw_drawn / nvw, ch_drawn / nvh)
+        scale = max(0.01, float(getattr(t, 'video_scale', 1.0)))
+        vw = nvw * fit_ratio * scale
+        vh = nvh * fit_ratio * scale
+
+        cw_nominal = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
+        screen_scale = cw_drawn / cw_nominal
+        off_x = float(getattr(t, 'pos_x', 0.0)) * screen_scale
+        off_y = float(getattr(t, 'pos_y', 0.0)) * screen_scale
+
+        vx = cx + (cw_drawn - vw) / 2.0 + off_x
+        vy = cy + (ch_drawn - vh) / 2.0 + off_y
+        return (vx, vy, vw, vh)
+
+    vc.get_canvas_rect = get_canvas_rect
+    vc._getVideoRect = patched_getVideoRect
+
+    # ── Wrap paintEvent ───────────────────────────────────────────────────────
+    orig_paintEvent = vc.paintEvent
+
+    def patched_paintEvent(event):
+        t = getattr(vc, '_canvas_transform', None)
+        saved_img = vc.current_image
+        has_rot = (t is not None and abs(getattr(t, 'rotation', 0.0)) > 0.01)
+
+        # 1. Base paint: if rotating, hide current_image temporarily so we draw it rotated
+        if has_rot:
+            vc.current_image = None
+        try:
+            orig_paintEvent(event)
+        finally:
+            if has_rot:
+                vc.current_image = saved_img
+
+        # 2. Draw canvas masking, crisp border, aspect ratio badge & crosshair
+        p = QPainter(vc)
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            if not t:
+                return
+
+            cx, cy, cw, ch = get_canvas_rect()
+            vx, vy, vw, vh = patched_getVideoRect()
+            W = float(vc.width())
+            H = float(vc.height())
+
+            # Draw rotated video image if rotation is active
+            if has_rot and saved_img and not saved_img.isNull():
+                p.save()
+                # Clip to canvas bounds
+                p.setClipRect(QRectF(cx, cy, cw, ch))
+                p.translate(vx + vw / 2.0, vy + vh / 2.0)
+                p.rotate(t.rotation)
+                p.drawImage(QRectF(-vw / 2.0, -vh / 2.0, vw, vh), saved_img)
+                p.restore()
+
+            # Dark masking outside canvas bounds
+            mask_color = QColor(8, 10, 15, 255)
+            if cx > 0:
+                p.fillRect(QRectF(0, 0, cx, H), mask_color)
+            if cx + cw < W:
+                p.fillRect(QRectF(cx + cw, 0, W - (cx + cw), H), mask_color)
+            if cy > 0:
+                p.fillRect(QRectF(cx, 0, cw, cy), mask_color)
+            if cy + ch < H:
+                p.fillRect(QRectF(cx, cy + ch, cw, H - (cy + ch)), mask_color)
+
+            # Canvas Border (Crisp Cyan #22D3EE)
+            pen_border = QPen(QColor("#22D3EE"), 2, Qt.PenStyle.SolidLine)
+            p.setPen(pen_border)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(cx, cy, cw, ch))
+
+            # Corner accents
+            c_len = 14.0
+            pen_corner = QPen(QColor("#38BDF8"), 3)
+            p.setPen(pen_corner)
+            p.drawLine(QPointF(cx, cy), QPointF(cx + c_len, cy))
+            p.drawLine(QPointF(cx, cy), QPointF(cx, cy + c_len))
+            p.drawLine(QPointF(cx + cw, cy), QPointF(cx + cw - c_len, cy))
+            p.drawLine(QPointF(cx + cw, cy), QPointF(cx + cw, cy + c_len))
+            p.drawLine(QPointF(cx, cy + ch), QPointF(cx + c_len, cy + ch))
+            p.drawLine(QPointF(cx, cy + ch), QPointF(cx, cy + ch - c_len))
+            p.drawLine(QPointF(cx + cw, cy + ch), QPointF(cx + cw - c_len, cy + ch))
+            p.drawLine(QPointF(cx + cw, cy + ch), QPointF(cx + cw, cy + ch - c_len))
+
+            # Center Crosshair
+            center_x = cx + cw / 2.0
+            center_y = cy + ch / 2.0
+            cross_sz = 8.0
+            pen_cross = QPen(QColor(34, 211, 238, 140), 1, Qt.PenStyle.DotLine)
+            p.setPen(pen_cross)
+            p.drawLine(QPointF(center_x - cross_sz, center_y), QPointF(center_x + cross_sz, center_y))
+            p.drawLine(QPointF(center_x, center_y - cross_sz), QPointF(center_x, center_y + cross_sz))
+
+            # Canvas Aspect Ratio Badge (Top-left inside canvas)
+            badge_h = 22.0
+            badge_w = 135.0
+            badge_rect = QRectF(cx + 6, cy + 6, badge_w, badge_h)
+            p.fillRect(badge_rect, QColor(15, 18, 25, 220))
+            p.setPen(QPen(QColor(34, 211, 238, 90), 1))
+            p.drawRect(badge_rect)
+
+            p.setPen(QPen(QColor("#22D3EE")))
+            p.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+            ratio_name = t.aspect_ratio.upper()
+            badge_text = f" {ratio_name}  {t.canvas_w}×{t.canvas_h}"
+            p.drawText(badge_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, badge_text)
+
+        finally:
+            p.end()
+
+    vc.paintEvent = patched_paintEvent
+
+    # ── Mouse Interaction (Drag Video & Wheel Zoom) ───────────────────────────
+    orig_mousePress = vc.mousePressEvent
+    orig_mouseMove = vc.mouseMoveEvent
+    orig_mouseRelease = vc.mouseReleaseEvent
+
+    _drag_state = {'active': False, 'pos': None}
+    _self = self
+
+    def patched_mousePress(event):
+        orig_mousePress(event)
+        # If user did not click on an overlay item (selected_item is None), they're dragging the video
+        if getattr(vc, 'selected_item', None) is None and event.button() == Qt.MouseButton.LeftButton:
+            _drag_state['active'] = True
+            _drag_state['pos'] = event.position()
+            vc.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            _drag_state['active'] = False
+
+    def patched_mouseMove(event):
+        if _drag_state['active'] and _drag_state['pos'] is not None:
+            cur_pos = event.position()
+            dx = cur_pos.x() - _drag_state['pos'].x()
+            dy = cur_pos.y() - _drag_state['pos'].y()
+            _drag_state['pos'] = cur_pos
+
+            cx, cy, cw_drawn, ch_drawn = get_canvas_rect()
+            t = getattr(vc, '_canvas_transform', None)
+            if t and cw_drawn > 0:
+                scale_to_screen = cw_drawn / float(t.canvas_w)
+                dx_canvas = dx / scale_to_screen
+                dy_canvas = dy / scale_to_screen
+                if hasattr(_self, '_canvas_controls'):
+                    _self._canvas_controls.update_pos_from_drag(dx_canvas, dy_canvas)
+        else:
+            orig_mouseMove(event)
+
+    def patched_mouseRelease(event):
+        if _drag_state['active']:
+            _drag_state['active'] = False
+            _drag_state['pos'] = None
+            vc.setCursor(Qt.CursorShape.ArrowCursor)
+        orig_mouseRelease(event)
+
+    def patched_wheel(event):
+        delta = event.angleDelta().y()
+        if hasattr(_self, '_canvas_controls'):
+            _self._canvas_controls.update_preview_zoom_from_scroll(delta)
+        event.accept()
+
+    vc.mousePressEvent = patched_mousePress
+    vc.mouseMoveEvent = patched_mouseMove
+    vc.mouseReleaseEvent = patched_mouseRelease
+    vc.wheelEvent = patched_wheel
+
+HomeInterface._setup_video_canvas_transform = _setup_video_canvas_transform
+
+
 # ─── Transform signal handlers ────────────────────────────────────────────────
 def _on_canvas_transform_changed(self, transform):
     """
-    Called when the user changes any aspect ratio / scale / position / rotation.
-    Stores the transform so video_renderer can use it at export time.
+    Called when user changes aspect ratio, scale, position, or rotation.
+    Instantly updates the visual canvas in VideoCanvasWidget and syncs state.
     """
     try:
         self._current_canvas_transform = transform
-        # Persist scale note in log
+        if hasattr(self, 'video_canvas') and self.video_canvas:
+            self.video_canvas._canvas_transform = transform
+            self.video_canvas.update()
+
+        # Log major ratio changes
         ratio_lbl = transform.aspect_ratio.upper()
         canvas_sz = f"{transform.canvas_w}×{transform.canvas_h}"
         scale_pct = int(transform.video_scale * 100)
-        # Only log major ratio changes to avoid spam
         log_key = f"{ratio_lbl}|{canvas_sz}"
         if getattr(self, '_last_canvas_log_key', None) != log_key:
             self._last_canvas_log_key = log_key
@@ -546,11 +717,13 @@ HomeInterface._on_canvas_transform_changed = _on_canvas_transform_changed
 
 
 def _on_preview_zoom_changed(self, zoom: float):
-    """Preview-only zoom change — does not trigger re-export."""
+    """Preview-only zoom change: updates preview display in real-time."""
     try:
         self._current_preview_zoom = zoom
-        # Nothing visual to update here because the base pyc manages preview rendering.
-        # If a CanvasPreviewWidget is embedded we'd call set_preview_zoom on it.
+        if hasattr(self, 'video_canvas') and self.video_canvas:
+            if hasattr(self.video_canvas, '_canvas_transform') and self.video_canvas._canvas_transform:
+                self.video_canvas._canvas_transform.preview_zoom = zoom
+            self.video_canvas.update()
     except Exception as e:
         print(f"[HikariDub] preview_zoom_changed handler error: {e}")
 
@@ -558,9 +731,16 @@ HomeInterface._on_preview_zoom_changed = _on_preview_zoom_changed
 
 
 def _on_fit_requested(self):
+    """Fit canvas to screen."""
     try:
-        self._current_preview_zoom = None  # fit mode
-        self._appendLog("⊡ Preview: Chế độ Vừa màn hình")
+        self._current_preview_zoom = 1.0
+        if hasattr(self, '_canvas_controls'):
+            self._canvas_controls.slider_zoom.setValue(100)
+        if hasattr(self, 'video_canvas') and self.video_canvas:
+            if hasattr(self.video_canvas, '_canvas_transform') and self.video_canvas._canvas_transform:
+                self.video_canvas._canvas_transform.preview_zoom = 1.0
+            self.video_canvas.update()
+        self._appendLog("⊡ Preview: Chế độ Vừa màn hình (100% Fit)")
     except Exception:
         pass
 
@@ -568,10 +748,15 @@ HomeInterface._on_fit_requested = _on_fit_requested
 
 
 def _on_reset_preview_zoom(self):
+    """Reset preview zoom to 100%."""
     try:
         self._current_preview_zoom = 1.0
         if hasattr(self, '_canvas_controls'):
-            self._canvas_controls._zoom_reset()
+            self._canvas_controls.slider_zoom.setValue(100)
+        if hasattr(self, 'video_canvas') and self.video_canvas:
+            if hasattr(self.video_canvas, '_canvas_transform') and self.video_canvas._canvas_transform:
+                self.video_canvas._canvas_transform.preview_zoom = 1.0
+            self.video_canvas.update()
         self._appendLog("⊞ Preview: Kích thước thực 100%")
     except Exception:
         pass
