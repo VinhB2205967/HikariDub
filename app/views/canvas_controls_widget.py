@@ -29,10 +29,21 @@ _SECTION_STYLE = f"""
     color: {_ACCENT};
     font-weight: 700;
     font-size: 11px;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 """
-_LABEL_STYLE = f"color: {_TEXT_DIM}; font-size: 11px;"
-_VALUE_STYLE = f"color: {_TEXT}; font-size: 12px; font-weight: 700;"
+_LABEL_STYLE = f"color: {_TEXT_DIM}; font-size: 11px; font-weight: 600;"
+_VALUE_STYLE = f"color: {_TEXT}; font-size: 11px; font-weight: 700;"
+
+_BADGE_STYLE = f"""
+    background-color: #191F2B;
+    border: 1px solid {_BORDER};
+    border-radius: 5px;
+    color: {_ACCENT};
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    padding: 3px 8px;
+"""
 
 _BTN_STYLE = f"""
     PushButton {{
@@ -43,6 +54,8 @@ _BTN_STYLE = f"""
         font-size: 11px;
         font-weight: 500;
         padding: 3px 8px;
+        min-height: 24px;
+        max-height: 24px;
     }}
     PushButton:hover {{
         background-color: #222A39;
@@ -56,15 +69,40 @@ _BTN_STYLE = f"""
 
 _SPINBOX_STYLE = f"""
     QDoubleSpinBox, QSpinBox {{
-        background-color: #0F1219;
+        background-color: #191F2B;
         border: 1px solid {_BORDER};
-        border-radius: 4px;
+        border-radius: 5px;
         color: {_TEXT};
         font-size: 11px;
-        padding: 2px 4px;
+        font-weight: 600;
+        padding-left: 6px;
+        padding-right: 2px;
+        min-height: 24px;
+        max-height: 24px;
     }}
     QDoubleSpinBox:focus, QSpinBox:focus {{
         border: 1px solid {_ACCENT};
+    }}
+    QDoubleSpinBox::up-button, QSpinBox::up-button {{
+        subcontrol-origin: border;
+        subcontrol-position: top right;
+        width: 15px;
+        border-left: 1px solid {_BORDER};
+        border-bottom: 1px solid {_BORDER};
+        background: #222A39;
+        border-top-right-radius: 4px;
+    }}
+    QDoubleSpinBox::down-button, QSpinBox::down-button {{
+        subcontrol-origin: border;
+        subcontrol-position: bottom right;
+        width: 15px;
+        border-left: 1px solid {_BORDER};
+        background: #222A39;
+        border-bottom-right-radius: 4px;
+    }}
+    QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
+    QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {{
+        background: {_ACCENT};
     }}
 """
 
@@ -97,7 +135,9 @@ _COMBO_STYLE = f"""
         font-size: 11px;
         font-weight: 600;
         padding: 3px 8px;
-        min-width: 90px;
+        min-height: 24px;
+        max-height: 24px;
+        min-width: 120px;
     }}
     QComboBox:hover {{
         border: 1px solid {_ACCENT};
@@ -114,7 +154,7 @@ _COMBO_STYLE = f"""
     }}
 """
 
-SEP_STYLE = f"background: {_BORDER}; max-width: 1px; min-width: 1px;"
+SEP_STYLE = f"background: {_BORDER}; max-width: 1px; min-width: 1px; max-height: 18px; min-height: 18px;"
 
 
 def _make_label(text: str, style: str = _LABEL_STYLE) -> QLabel:
@@ -132,7 +172,8 @@ def _make_separator() -> QFrame:
 
 class CanvasControlsWidget(QWidget):
     """
-    Unified toolbar for Canvas Aspect Ratio and Video Zoom & Position controls.
+    Unified toolbar for Canvas Aspect Ratio, Video Zoom, and Position Transform controls.
+    Clean 3-row layout with generous breathing room and zero clipping.
     """
 
     transform_changed = pyqtSignal(object)  # CanvasTransform
@@ -152,12 +193,12 @@ class CanvasControlsWidget(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 4, 6, 4)
+        root.setContentsMargins(8, 4, 8, 6)
         root.setSpacing(4)
 
         # ── Row 1: Aspect Ratio toolbar ──────────────────────────────────────
         row1 = QHBoxLayout()
-        row1.setSpacing(6)
+        row1.setSpacing(8)
 
         row1.addWidget(_make_label("Tỷ lệ khung hình:", _SECTION_STYLE))
 
@@ -168,7 +209,7 @@ class CanvasControlsWidget(QWidget):
 
         ratio_display = {
             "16:9": "16:9 (Ngang)",
-            "9:16": "9:16 (Dọc Shorts/Reels)",
+            "9:16": "9:16 (Dọc Shorts)",
             "3:4":  "3:4 (Dọc)",
             "1:1":  "1:1 (Vuông)",
             "4:3":  "4:3 (Truyền thống)",
@@ -204,122 +245,135 @@ class CanvasControlsWidget(QWidget):
         # Fit & Fill quick buttons
         self.btn_fit = PushButton("⊡ Vừa khung (Fit)")
         self.btn_fit.setStyleSheet(_BTN_STYLE)
-        self.btn_fit.setFixedHeight(26)
+        self.btn_fit.setFixedHeight(24)
         self.btn_fit.setToolTip("Hiển thị toàn bộ video vừa với Canvas (Zoom 100%)")
 
-        self.btn_fill = PushButton("⊞ Lấp đầy (Fill / Crop)")
+        self.btn_fill = PushButton("⊞ Lấp đầy (Fill)")
         self.btn_fill.setStyleSheet(_BTN_STYLE)
-        self.btn_fill.setFixedHeight(26)
+        self.btn_fill.setFixedHeight(24)
         self.btn_fill.setToolTip("Phóng to video vừa khít Canvas không có viền đen")
 
         row1.addWidget(self.btn_fit)
         row1.addWidget(self.btn_fill)
         row1.addStretch()
 
-        # Canvas nominal size display
-        self.lbl_canvas_size = _make_label("1920 × 1080", _VALUE_STYLE)
+        # Canvas nominal size display as pill badge
+        self.lbl_canvas_size = _make_label("1920 × 1080", _BADGE_STYLE)
         self.lbl_canvas_size.setToolTip("Kích thước Canvas xuất video")
         row1.addWidget(self.lbl_canvas_size)
 
         root.addLayout(row1)
 
-        # ── Row 2: Video Zoom & Position Transform ───────────────────────────
+        # ── Row 2: Video Zoom ────────────────────────────────────────────────
         row2 = QHBoxLayout()
-        row2.setSpacing(6)
+        row2.setSpacing(8)
 
         row2.addWidget(_make_label("Video Zoom:", _SECTION_STYLE))
 
         self.btn_zoom_out = PushButton("−")
         self.btn_zoom_out.setStyleSheet(_BTN_STYLE)
-        self.btn_zoom_out.setFixedSize(26, 26)
+        self.btn_zoom_out.setFixedSize(24, 24)
         self.btn_zoom_out.setToolTip("Thu nhỏ video (−10%)")
 
         self.slider_zoom = QSlider(Qt.Orientation.Horizontal)
         self.slider_zoom.setRange(10, 300)
         self.slider_zoom.setValue(100)
-        self.slider_zoom.setFixedWidth(150)
+        self.slider_zoom.setFixedWidth(160)
         self.slider_zoom.setStyleSheet(_SLIDER_STYLE)
         self.slider_zoom.setToolTip("Kéo để phóng to / thu nhỏ video bên trong Canvas")
 
         self.btn_zoom_in = PushButton("+")
         self.btn_zoom_in.setStyleSheet(_BTN_STYLE)
-        self.btn_zoom_in.setFixedSize(26, 26)
+        self.btn_zoom_in.setFixedSize(24, 24)
         self.btn_zoom_in.setToolTip("Phóng to video (+10%)")
 
-        self.lbl_zoom_val = _make_label("100%", _VALUE_STYLE)
-        self.lbl_zoom_val.setFixedWidth(40)
-
-        self.btn_zoom_reset = PushButton("↺ 100%")
-        self.btn_zoom_reset.setStyleSheet(_BTN_STYLE)
-        self.btn_zoom_reset.setFixedHeight(26)
-        self.btn_zoom_reset.setToolTip("Đặt lại Video Zoom về 100%")
+        self.lbl_zoom_val = _make_label("100%", f"color: {_ACCENT}; font-size: 11px; font-weight: 700;")
+        self.lbl_zoom_val.setFixedWidth(42)
 
         row2.addWidget(self.btn_zoom_out)
         row2.addWidget(self.slider_zoom)
         row2.addWidget(self.btn_zoom_in)
         row2.addWidget(self.lbl_zoom_val)
-        row2.addWidget(self.btn_zoom_reset)
 
         row2.addWidget(_make_separator())
 
-        # Position X
-        row2.addWidget(_make_label("X:"))
+        self.btn_zoom_reset = PushButton("↺ 100%")
+        self.btn_zoom_reset.setStyleSheet(_BTN_STYLE)
+        self.btn_zoom_reset.setFixedHeight(24)
+        self.btn_zoom_reset.setToolTip("Đặt lại Video Zoom về 100%")
+        row2.addWidget(self.btn_zoom_reset)
+
+        row2.addStretch()
+        root.addLayout(row2)
+
+        # ── Row 3: Video Position & Rotation ─────────────────────────────────
+        row3 = QHBoxLayout()
+        row3.setSpacing(8)
+
+        row3.addWidget(_make_label("Vị trí & Góc xoay:", _SECTION_STYLE))
+
+        # Position X (Integer px)
+        row3.addWidget(_make_label("X:"))
         self.spin_pos_x = QDoubleSpinBox()
+        self.spin_pos_x.setDecimals(0)
         self.spin_pos_x.setRange(-4000, 4000)
         self.spin_pos_x.setValue(0)
         self.spin_pos_x.setSingleStep(10.0)
         self.spin_pos_x.setSuffix(" px")
-        self.spin_pos_x.setFixedWidth(82)
+        self.spin_pos_x.setFixedWidth(78)
         self.spin_pos_x.setStyleSheet(_SPINBOX_STYLE)
-        self.spin_pos_x.setToolTip("Vị trí ngang video trong Canvas")
-        row2.addWidget(self.spin_pos_x)
+        self.spin_pos_x.setToolTip("Vị trí ngang video trong Canvas (kéo chuột để di chuyển)")
+        row3.addWidget(self.spin_pos_x)
 
-        # Position Y
-        row2.addWidget(_make_label("Y:"))
+        # Position Y (Integer px)
+        row3.addWidget(_make_label("Y:"))
         self.spin_pos_y = QDoubleSpinBox()
+        self.spin_pos_y.setDecimals(0)
         self.spin_pos_y.setRange(-4000, 4000)
         self.spin_pos_y.setValue(0)
         self.spin_pos_y.setSingleStep(10.0)
         self.spin_pos_y.setSuffix(" px")
-        self.spin_pos_y.setFixedWidth(82)
+        self.spin_pos_y.setFixedWidth(78)
         self.spin_pos_y.setStyleSheet(_SPINBOX_STYLE)
-        self.spin_pos_y.setToolTip("Vị trí dọc video trong Canvas")
-        row2.addWidget(self.spin_pos_y)
+        self.spin_pos_y.setToolTip("Vị trí dọc video trong Canvas (kéo chuột để di chuyển)")
+        row3.addWidget(self.spin_pos_y)
 
         # Rotation
-        row2.addWidget(_make_label("Xoay:"))
+        row3.addWidget(_make_label("Xoay:"))
         self.spin_rot = QDoubleSpinBox()
+        self.spin_rot.setDecimals(0)
         self.spin_rot.setRange(-360, 360)
         self.spin_rot.setValue(0)
         self.spin_rot.setSingleStep(1.0)
-        self.spin_rot.setSuffix(" °")
-        self.spin_rot.setFixedWidth(70)
+        self.spin_rot.setSuffix("°")
+        self.spin_rot.setFixedWidth(66)
         self.spin_rot.setStyleSheet(_SPINBOX_STYLE)
         self.spin_rot.setToolTip("Góc xoay video")
-        row2.addWidget(self.spin_rot)
+        row3.addWidget(self.spin_rot)
 
-        row2.addWidget(_make_separator())
+        row3.addWidget(_make_separator())
 
         self.btn_center = PushButton("⊕ Căn giữa")
         self.btn_center.setStyleSheet(_BTN_STYLE)
-        self.btn_center.setFixedHeight(26)
+        self.btn_center.setFixedHeight(24)
         self.btn_center.setToolTip("Đưa video về tâm Canvas (X=0, Y=0)")
 
         self.btn_reset_all = PushButton("↺ Đặt lại")
         self.btn_reset_all.setStyleSheet(_BTN_STYLE)
-        self.btn_reset_all.setFixedHeight(26)
+        self.btn_reset_all.setFixedHeight(24)
         self.btn_reset_all.setToolTip("Khôi phục toàn bộ: Zoom 100%, X=0, Y=0, Xoay 0°")
 
-        row2.addWidget(self.btn_center)
-        row2.addWidget(self.btn_reset_all)
-        row2.addStretch()
+        row3.addWidget(self.btn_center)
+        row3.addWidget(self.btn_reset_all)
+        row3.addStretch()
 
-        root.addLayout(row2)
+        root.addLayout(row3)
 
         self.setStyleSheet(f"""
             CanvasControlsWidget {{
                 background-color: {_PANEL_BG};
                 border-bottom: 1px solid {_BORDER};
+                border-radius: 8px;
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -357,17 +411,17 @@ class CanvasControlsWidget(QWidget):
                 self.combo_ratio.setCurrentIndex(idx)
             is_custom = (t.aspect_ratio == "custom")
             self._set_custom_visible(is_custom)
-            self.spin_cw.setValue(t.canvas_w)
-            self.spin_ch.setValue(t.canvas_h)
+            self.spin_cw.setValue(int(t.canvas_w))
+            self.spin_ch.setValue(int(t.canvas_h))
             self.lbl_canvas_size.setText(f"{t.canvas_w} × {t.canvas_h}")
 
             zoom_pct = int(round(t.video_scale * 100))
             self.slider_zoom.setValue(max(10, min(300, zoom_pct)))
             self.lbl_zoom_val.setText(f"{zoom_pct}%")
 
-            self.spin_pos_x.setValue(t.pos_x)
-            self.spin_pos_y.setValue(t.pos_y)
-            self.spin_rot.setValue(t.rotation)
+            self.spin_pos_x.setValue(round(t.pos_x))
+            self.spin_pos_y.setValue(round(t.pos_y))
+            self.spin_rot.setValue(round(t.rotation))
         finally:
             self._updating = False
 
@@ -421,9 +475,9 @@ class CanvasControlsWidget(QWidget):
     def _on_pos_changed(self):
         if self._updating:
             return
-        self._transform.pos_x = self.spin_pos_x.value()
-        self._transform.pos_y = self.spin_pos_y.value()
-        self._transform.rotation = self.spin_rot.value()
+        self._transform.pos_x = round(self.spin_pos_x.value())
+        self._transform.pos_y = round(self.spin_pos_y.value())
+        self._transform.rotation = round(self.spin_rot.value())
         self._emit()
 
     def _center_video(self):
@@ -476,8 +530,8 @@ class CanvasControlsWidget(QWidget):
         self.slider_zoom.setValue(max(10, min(300, pct)))
 
     def update_pos_from_drag(self, dx: float, dy: float):
-        self._transform.pos_x += dx
-        self._transform.pos_y += dy
+        self._transform.pos_x = float(round(self._transform.pos_x + dx))
+        self._transform.pos_y = float(round(self._transform.pos_y + dy))
         self._updating = True
         self.spin_pos_x.setValue(self._transform.pos_x)
         self.spin_pos_y.setValue(self._transform.pos_y)
