@@ -1,6 +1,7 @@
 """
 Home Interface Module - Free Forever & Local-First Edition
 Wraps and patches HomeInterface to remove subscription checks and API key requirements.
+Includes Canvas Aspect Ratio, Zoom & Video Transform controls (v3.1).
 """
 
 import os
@@ -412,4 +413,196 @@ def _onTranslateClicked_patched(self):
     self.translate_worker.start()
 
 HomeInterface._onTranslateClicked = _onTranslateClicked_patched
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canvas Controls Integration (Aspect Ratio + Zoom + Video Transform)
+# ─────────────────────────────────────────────────────────────────────────────
+_orig_init_canvas = HomeInterface.__init__
+
+def _init_canvas_controls(self, parent=None):
+    """
+    Runs after _init_patched. Inserts CanvasControlsWidget above the video
+    preview area in col2 and wires all signals.
+    """
+    _orig_init_canvas(self, parent)
+    try:
+        from PyQt6.QtWidgets import QVBoxLayout, QWidget
+        from app.views.canvas_controls_widget import CanvasControlsWidget
+        from app.views.canvas_preview_widget import CanvasPreviewWidget
+        from app.core.canvas_transform import CanvasTransform
+
+        # Build the controls bar
+        self._canvas_controls = CanvasControlsWidget()
+        self._canvas_controls.setObjectName("hikariCanvasControls")
+
+        # Locate video_frame in col2 layout and insert controls above it
+        inserted = False
+        for i in range(self.col2_layout.count()):
+            item = self.col2_layout.itemAt(i)
+            if item and item.widget() and item.widget() is getattr(self, 'video_frame', None):
+                self.col2_layout.insertWidget(i, self._canvas_controls)
+                inserted = True
+                break
+
+        if not inserted:
+            # Fallback: insert after the title label (index 1)
+            self.col2_layout.insertWidget(1, self._canvas_controls)
+
+        # ── Wire signals ──────────────────────────────────────────────────────
+        self._canvas_controls.transform_changed.connect(self._on_canvas_transform_changed)
+        self._canvas_controls.preview_zoom_changed.connect(self._on_preview_zoom_changed)
+        self._canvas_controls.fit_requested.connect(self._on_fit_requested)
+        self._canvas_controls.reset_preview_zoom_requested.connect(self._on_reset_preview_zoom)
+
+        # Wire canvas preview widget signals back to controls (drag → position)
+        if hasattr(self, 'video_canvas'):
+            # Monkey-patch video_canvas to forward drag events to controls
+            _orig_vc_press2  = self.video_canvas.mousePressEvent
+            _orig_vc_move2   = self.video_canvas.mouseMoveEvent
+            _orig_vc_release2 = self.video_canvas.mouseReleaseEvent
+            _orig_vc_wheel2  = self.video_canvas.wheelEvent
+            _self = self
+
+            import math as _math
+            _drag_start = [None]
+
+            def _vc_press(e):
+                from PyQt6.QtCore import QPointF
+                from PyQt6.QtCore import Qt
+                if e.button() == Qt.MouseButton.LeftButton:
+                    _drag_start[0] = QPointF(e.position())
+                _orig_vc_press2(e)
+
+            def _vc_move(e):
+                from PyQt6.QtCore import QPointF
+                if _drag_start[0] is not None:
+                    pos = QPointF(e.position())
+                    dx = pos.x() - _drag_start[0].x()
+                    dy = pos.y() - _drag_start[0].y()
+                    _drag_start[0] = pos
+                    if hasattr(_self, '_canvas_controls'):
+                        _self._canvas_controls.update_pos_from_drag(dx, dy)
+                else:
+                    _orig_vc_move2(e)
+
+            def _vc_release(e):
+                from PyQt6.QtCore import Qt
+                if e.button() == Qt.MouseButton.LeftButton:
+                    _drag_start[0] = None
+                _orig_vc_release2(e)
+
+            def _vc_wheel(e):
+                delta = e.angleDelta().y()
+                if hasattr(_self, '_canvas_controls'):
+                    _self._canvas_controls.update_preview_zoom_from_scroll(delta)
+                else:
+                    _orig_vc_wheel2(e)
+                e.accept()
+
+            self.video_canvas.mousePressEvent  = _vc_press
+            self.video_canvas.mouseMoveEvent   = _vc_move
+            self.video_canvas.mouseReleaseEvent = _vc_release
+            try:
+                self.video_canvas.wheelEvent = _vc_wheel
+            except Exception:
+                pass
+
+        # Kick off initial transform sync
+        t = self._canvas_controls.get_transform()
+        self._on_canvas_transform_changed(t)
+
+    except Exception as e:
+        print(f"[HikariDub] Canvas controls init error: {e}")
+        import traceback; traceback.print_exc()
+
+HomeInterface.__init__ = _init_canvas_controls
+
+
+# ─── Transform signal handlers ────────────────────────────────────────────────
+def _on_canvas_transform_changed(self, transform):
+    """
+    Called when the user changes any aspect ratio / scale / position / rotation.
+    Stores the transform so video_renderer can use it at export time.
+    """
+    try:
+        self._current_canvas_transform = transform
+        # Persist scale note in log
+        ratio_lbl = transform.aspect_ratio.upper()
+        canvas_sz = f"{transform.canvas_w}×{transform.canvas_h}"
+        scale_pct = int(transform.video_scale * 100)
+        # Only log major ratio changes to avoid spam
+        log_key = f"{ratio_lbl}|{canvas_sz}"
+        if getattr(self, '_last_canvas_log_key', None) != log_key:
+            self._last_canvas_log_key = log_key
+            self._appendLog(
+                f"🎨 Canvas: {ratio_lbl} ({canvas_sz}) · Scale {scale_pct}% "
+                f"· X={int(transform.pos_x)}px Y={int(transform.pos_y)}px "
+                f"· Rot={transform.rotation:.1f}°"
+            )
+    except Exception as e:
+        print(f"[HikariDub] transform_changed handler error: {e}")
+
+HomeInterface._on_canvas_transform_changed = _on_canvas_transform_changed
+
+
+def _on_preview_zoom_changed(self, zoom: float):
+    """Preview-only zoom change — does not trigger re-export."""
+    try:
+        self._current_preview_zoom = zoom
+        # Nothing visual to update here because the base pyc manages preview rendering.
+        # If a CanvasPreviewWidget is embedded we'd call set_preview_zoom on it.
+    except Exception as e:
+        print(f"[HikariDub] preview_zoom_changed handler error: {e}")
+
+HomeInterface._on_preview_zoom_changed = _on_preview_zoom_changed
+
+
+def _on_fit_requested(self):
+    try:
+        self._current_preview_zoom = None  # fit mode
+        self._appendLog("⊡ Preview: Chế độ Vừa màn hình")
+    except Exception:
+        pass
+
+HomeInterface._on_fit_requested = _on_fit_requested
+
+
+def _on_reset_preview_zoom(self):
+    try:
+        self._current_preview_zoom = 1.0
+        if hasattr(self, '_canvas_controls'):
+            self._canvas_controls._zoom_reset()
+        self._appendLog("⊞ Preview: Kích thước thực 100%")
+    except Exception:
+        pass
+
+HomeInterface._on_reset_preview_zoom = _on_reset_preview_zoom
+
+
+# ─── Expose transform to video_renderer (video_config injection) ───────────────
+_orig_render_step = getattr(HomeInterface, '_onRenderClicked', None) or \
+                    getattr(HomeInterface, '_onStep4Clicked', None)
+
+def _build_video_config_with_transform(self):
+    """Returns a video_config dict enriched with canvas transform data."""
+    base_cfg = {}
+    try:
+        base_build = getattr(super(HomeInterface, self), '_build_video_config', None)
+        if callable(base_build):
+            base_cfg = base_build() or {}
+    except Exception:
+        pass
+
+    if hasattr(self, '_current_canvas_transform'):
+        t = self._current_canvas_transform
+        base_cfg['canvas_w']     = t.canvas_w
+        base_cfg['canvas_h']     = t.canvas_h
+        base_cfg['video_scale']  = t.video_scale
+        base_cfg['pos_x']        = t.pos_x
+        base_cfg['pos_y']        = t.pos_y
+        base_cfg['rotation']     = t.rotation
+        base_cfg['aspect_ratio'] = t.aspect_ratio
+    return base_cfg
+
+HomeInterface._build_video_config_with_transform = _build_video_config_with_transform
 

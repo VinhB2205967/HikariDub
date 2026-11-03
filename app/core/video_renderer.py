@@ -231,3 +231,178 @@ render_logic = render_logic_patched
 _base_mod.render_logic = render_logic_patched
 _base_mod.render_logic_patched = render_logic_patched
 _base_mod.upgrade_ffmpeg_cmd = upgrade_ffmpeg_cmd
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canvas Transform Export Integration
+# Reads canvas_transform.json written by CanvasControlsWidget and injects
+# the correct FFmpeg filters into the export pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_video_dimensions(video_path: str):
+    """Return (width, height) of video using ffprobe. Returns (1920,1080) on failure."""
+    try:
+        import subprocess as _sp, json as _json
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", video_path
+        ]
+        res = _sp.run(probe_cmd, capture_output=True, text=True, timeout=15)
+        data = _json.loads(res.stdout)
+        for s in data.get("streams", []):
+            if s.get("codec_type") == "video":
+                return int(s.get("width", 1920)), int(s.get("height", 1080))
+    except Exception:
+        pass
+    return 1920, 1080
+
+
+def apply_canvas_transform_to_ffmpeg(cmd_list: list, video_path: str, video_config: dict = None) -> list:
+    """
+    Injects canvas transform (aspect ratio, scale, position, rotation) into
+    the FFmpeg command's filter chain.
+
+    This runs BEFORE upgrade_ffmpeg_cmd so the 1080p scale filter is appended last.
+    """
+    try:
+        from app.core.canvas_transform import load_transform, build_ffmpeg_vf
+
+        # Load persisted transform
+        transform = load_transform()
+
+        # Allow video_config to override persisted transform (e.g., from UI)
+        if video_config:
+            if 'canvas_w'     in video_config: transform.canvas_w     = int(video_config['canvas_w'])
+            if 'canvas_h'     in video_config: transform.canvas_h     = int(video_config['canvas_h'])
+            if 'video_scale'  in video_config: transform.video_scale  = float(video_config['video_scale'])
+            if 'pos_x'        in video_config: transform.pos_x        = float(video_config['pos_x'])
+            if 'pos_y'        in video_config: transform.pos_y        = float(video_config['pos_y'])
+            if 'rotation'     in video_config: transform.rotation     = float(video_config['rotation'])
+
+        # Only inject if user changed canvas size or position/scale/rotation
+        is_default = (
+            transform.aspect_ratio == "16:9"
+            and transform.canvas_w == 1920
+            and transform.canvas_h == 1080
+            and abs(transform.video_scale - 1.0) < 0.01
+            and abs(transform.pos_x) < 1
+            and abs(transform.pos_y) < 1
+            and abs(transform.rotation) < 0.1
+        )
+        if is_default:
+            return cmd_list  # nothing to do — upgrade_ffmpeg_cmd handles 1080p
+
+        # Get source video dimensions
+        src_w, src_h = _get_video_dimensions(video_path)
+
+        # Build the canvas transform vf filter
+        canvas_vf = build_ffmpeg_vf(transform, src_w, src_h)
+
+        new_cmd = list(cmd_list)
+
+        # Inject into existing filter_complex or -vf, or add new -vf
+        has_filter_complex = False
+        has_vf = False
+        i = 0
+        result = []
+
+        while i < len(new_cmd):
+            arg = new_cmd[i]
+            if arg == '-filter_complex' and i + 1 < len(new_cmd):
+                has_filter_complex = True
+                fc = new_cmd[i + 1]
+                # Prepend canvas transform to video stream
+                if '[0:v]' in fc:
+                    fc = fc.replace('[0:v]', f'[0:v]{canvas_vf}[v_canvas_in];[v_canvas_in]', 1)
+                else:
+                    fc = f"[0:v]{canvas_vf}[v_canvas_out];{fc}"
+                result.extend(['-filter_complex', fc])
+                i += 2
+                continue
+            elif arg == '-vf' and i + 1 < len(new_cmd):
+                has_vf = True
+                vf = new_cmd[i + 1]
+                result.extend(['-vf', f"{canvas_vf},{vf}"])
+                i += 2
+                continue
+            result.append(arg)
+            i += 1
+
+        if not has_filter_complex and not has_vf:
+            # Insert -vf before the output file (last arg)
+            out = result.pop()
+            result.extend(['-vf', canvas_vf])
+            result.append(out)
+
+        return result
+
+    except Exception as e:
+        print(f"[HikariDub] canvas transform export error: {e}")
+        import traceback; traceback.print_exc()
+        return cmd_list  # fail-safe: return original command
+
+
+# Patch render_logic to also apply canvas transform before 1080p upgrade
+_orig_render_logic_v2 = render_logic_patched
+
+def render_logic_with_canvas(video_path, srt_path, audio_path, workspace_dir,
+                              status_cb, cancel_event, license_status='expired',
+                              video_config=None):
+    """
+    Enhanced render_logic that applies canvas transform THEN 1080p upgrade.
+    """
+    license_status = 'premium'
+
+    announced_hd = [False]
+    def wrapped_status_cb2(msg, *a, **kw):
+        if not announced_hd[0] and ('bắt đầu' in msg.lower() or 'xuất video' in msg.lower()):
+            announced_hd[0] = True
+            msg = f"{msg} [Chuẩn 1080p Full HD - 60 FPS + Canvas Transform]"
+        if status_cb:
+            try:
+                status_cb(msg, *a, **kw)
+            except Exception:
+                try:
+                    status_cb(msg)
+                except Exception:
+                    pass
+
+    orig_sub_popen2 = _base_mod.subprocess.Popen
+
+    class CanvasAndHDPopen(orig_sub_popen2):
+        def __init__(self, *args, **kwargs):
+            try:
+                cmd = args[0] if args else kwargs.get('args')
+                if isinstance(cmd, list):
+                    # Step 1: apply canvas transform
+                    cmd = apply_canvas_transform_to_ffmpeg(cmd, video_path, video_config)
+                    # Step 2: upgrade to 1080p/60fps
+                    cmd = upgrade_ffmpeg_cmd(cmd)
+                if args:
+                    args = (cmd,) + args[1:]
+                elif 'args' in kwargs:
+                    kwargs['args'] = cmd
+            except Exception:
+                pass
+            super().__init__(*args, **kwargs)
+
+    _base_mod.subprocess.Popen = CanvasAndHDPopen
+
+    try:
+        return _orig_render_logic(\
+            video_path=video_path,
+            srt_path=srt_path,
+            audio_path=audio_path,
+            workspace_dir=workspace_dir,
+            status_cb=wrapped_status_cb2,
+            cancel_event=cancel_event,
+            license_status='premium',
+            video_config=video_config
+        )
+    finally:
+        _base_mod.subprocess.Popen = orig_sub_popen2
+
+
+render_logic = render_logic_with_canvas
+_base_mod.render_logic = render_logic_with_canvas
+_base_mod.render_logic_patched = render_logic_with_canvas
