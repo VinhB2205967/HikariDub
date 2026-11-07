@@ -17,16 +17,20 @@ from app.core.canvas_transform import (
     save_transform, load_transform
 )
 
-# ─────────────────────────────── Style constants ──────────────────────────────
-_DARK_BG     = "#121620"
-_PANEL_BG    = "#0F1219"
-_BORDER      = "#293244"
-_ACCENT      = "#22D3EE"
-_TEXT        = "#F1F5F9"
+# ─────────────────────────────── Style constants (Modern SaaS Palette) ───────
+_DARK_BG     = "#151B2E"
+_PANEL_BG    = "#111728"
+_BORDER      = "#242F4B"
+_PRIMARY     = "#6366F1"
+_SECONDARY   = "#8B5CF6"
+_ACCENT      = "#06B6D4"
+_ACCENT_BRI  = "#22D3EE"
+_HIGHLIGHT   = "#EC4899"
+_TEXT        = "#F8FAFC"
 _TEXT_DIM    = "#94A3B8"
 
 _SECTION_STYLE = f"""
-    color: {_ACCENT};
+    color: {_ACCENT_BRI};
     font-weight: 700;
     font-size: 11px;
     letter-spacing: 0.3px;
@@ -35,43 +39,44 @@ _LABEL_STYLE = f"color: {_TEXT_DIM}; font-size: 11px; font-weight: 600;"
 _VALUE_STYLE = f"color: {_TEXT}; font-size: 11px; font-weight: 700;"
 
 _BADGE_STYLE = f"""
-    background-color: #191F2B;
-    border: 1px solid {_BORDER};
-    border-radius: 5px;
-    color: {_ACCENT};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(99, 102, 241, 0.22), stop:1 rgba(139, 92, 246, 0.22));
+    border: 1px solid {_PRIMARY};
+    border-radius: 6px;
+    color: {_ACCENT_BRI};
     font-size: 11px;
     font-weight: 700;
     font-family: 'Consolas', monospace;
-    padding: 3px 8px;
+    padding: 3px 9px;
 """
 
 _BTN_STYLE = f"""
     PushButton {{
-        background-color: #191F2B;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1C253E, stop:1 #141B2E);
         border: 1px solid {_BORDER};
-        border-radius: 5px;
+        border-radius: 6px;
         color: {_TEXT};
         font-size: 11px;
-        font-weight: 500;
-        padding: 3px 8px;
+        font-weight: 600;
+        padding: 3px 9px;
         min-height: 24px;
         max-height: 24px;
     }}
     PushButton:hover {{
-        background-color: #222A39;
-        border: 1px solid {_ACCENT};
-        color: {_ACCENT};
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366F1, stop:1 #8B5CF6);
+        border: 1px solid #A78BFA;
+        color: #FFFFFF;
     }}
     PushButton:pressed {{
-        background-color: #121620;
+        background: #4F46E5;
+        color: #FFFFFF;
     }}
 """
 
 _SPINBOX_STYLE = f"""
     QDoubleSpinBox, QSpinBox {{
-        background-color: #191F2B;
+        background-color: #090E1C;
         border: 1px solid {_BORDER};
-        border-radius: 5px;
+        border-radius: 6px;
         color: {_TEXT};
         font-size: 11px;
         font-weight: 600;
@@ -80,8 +85,12 @@ _SPINBOX_STYLE = f"""
         min-height: 24px;
         max-height: 24px;
     }}
+    QDoubleSpinBox:hover, QSpinBox:hover {{
+        border: 1px solid {_PRIMARY};
+    }}
     QDoubleSpinBox:focus, QSpinBox:focus {{
-        border: 1px solid {_ACCENT};
+        border: 1px solid {_ACCENT_BRI};
+        background-color: #070B16;
     }}
     QDoubleSpinBox::up-button, QSpinBox::up-button {{
         subcontrol-origin: border;
@@ -89,48 +98,53 @@ _SPINBOX_STYLE = f"""
         width: 15px;
         border-left: 1px solid {_BORDER};
         border-bottom: 1px solid {_BORDER};
-        background: #222A39;
-        border-top-right-radius: 4px;
+        background: #1A2238;
+        border-top-right-radius: 5px;
     }}
     QDoubleSpinBox::down-button, QSpinBox::down-button {{
         subcontrol-origin: border;
         subcontrol-position: bottom right;
         width: 15px;
         border-left: 1px solid {_BORDER};
-        background: #222A39;
-        border-bottom-right-radius: 4px;
+        background: #1A2238;
+        border-bottom-right-radius: 5px;
     }}
     QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
     QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {{
-        background: {_ACCENT};
+        background: {_PRIMARY};
     }}
 """
 
 _SLIDER_STYLE = f"""
     QSlider::groove:horizontal {{
-        height: 4px;
-        background: {_BORDER};
+        height: 5px;
+        background: #090E1C;
+        border: 1px solid {_BORDER};
         border-radius: 2px;
     }}
     QSlider::handle:horizontal {{
-        background: {_ACCENT};
-        border: 2px solid {_ACCENT};
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {_ACCENT_BRI}, stop:1 {_PRIMARY});
+        border: 2px solid #FFFFFF;
         width: 14px;
         height: 14px;
-        margin: -5px 0;
+        margin: -6px 0;
         border-radius: 7px;
     }}
+    QSlider::handle:horizontal:hover {{
+        background: {_HIGHLIGHT};
+        border: 2px solid #FFFFFF;
+    }}
     QSlider::sub-page:horizontal {{
-        background: {_ACCENT};
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {_ACCENT}, stop:0.6 {_PRIMARY}, stop:1 {_SECONDARY});
         border-radius: 2px;
     }}
 """
 
 _COMBO_STYLE = f"""
     QComboBox {{
-        background-color: #191F2B;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1C253E, stop:1 #131A2C);
         border: 1px solid {_BORDER};
-        border-radius: 5px;
+        border-radius: 6px;
         color: {_TEXT};
         font-size: 11px;
         font-weight: 600;
@@ -140,17 +154,21 @@ _COMBO_STYLE = f"""
         min-width: 120px;
     }}
     QComboBox:hover {{
-        border: 1px solid {_ACCENT};
+        border: 1px solid {_PRIMARY};
+    }}
+    QComboBox:focus {{
+        border: 1px solid {_ACCENT_BRI};
     }}
     QComboBox::drop-down {{
         border: none;
         width: 18px;
     }}
     QComboBox QAbstractItemView {{
-        background-color: #191F2B;
-        border: 1px solid {_BORDER};
+        background-color: #151B2E;
+        border: 1px solid {_PRIMARY};
         color: {_TEXT};
-        selection-background-color: #222A39;
+        selection-background-color: {_PRIMARY};
+        selection-color: #FFFFFF;
     }}
 """
 
@@ -371,9 +389,9 @@ class CanvasControlsWidget(QWidget):
 
         self.setStyleSheet(f"""
             CanvasControlsWidget {{
-                background-color: {_PANEL_BG};
-                border-bottom: 1px solid {_BORDER};
-                border-radius: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0E1426, stop:0.5 #131B31, stop:1 #0E1426);
+                border: 1px solid {_BORDER};
+                border-radius: 9px;
             }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

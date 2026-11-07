@@ -37,6 +37,71 @@ for attr in dir(_base_mod):
     if not attr.startswith('__'):
         globals()[attr] = getattr(_base_mod, attr)
 
+import re as _re
+
+def _upgrade_mask_filters_in_fc(fc_str: str, src_w: int = None, src_h: int = None) -> str:
+    """
+    Upgrades Box-Blur mask stages in FFmpeg filter_complex to a hybrid
+    `delogo + high-sigma Gaussian blur` pipeline with slight vertical padding.
+    This interpolates surrounding background pixels first (completely erasing high-contrast
+    white/colored subtitle text) and then smooths the region with Gaussian blur, matching
+    the preview canvas 1:1.
+    """
+    if not fc_str:
+        return fc_str
+
+    # Infer native source dimensions from the [v_anticopy] scale=W:H stage if not passed
+    if not src_w or not src_h:
+        m_scale = _re.search(r'crop=iw\*0\.99:ih\*0\.99,scale=(\d+):(\d+)', fc_str)
+        if m_scale:
+            src_w = int(m_scale.group(1))
+            src_h = int(m_scale.group(2))
+
+    pattern = _re.compile(
+        r'(\[(?:0:v|v_mask\d+|v_canvas_in)\])'
+        r'split=2\[orig_m(\d+)\]\[tocrop_m\2\];'
+        r'\[tocrop_m\2\]crop=(\d+):(\d+):(\d+):(\d+),gblur=sigma=\d+:steps=\d+\[blurred_m\2\];'
+        r'\[orig_m\2\]\[blurred_m\2\]overlay=\5:\6(\[v_mask\2\])'
+    )
+
+    def _repl(match):
+        in_pad = match.group(1)
+        idx = match.group(2)
+        mw = int(match.group(3))
+        mh = int(match.group(4))
+        mx = int(match.group(5))
+        my = int(match.group(6))
+        out_pad = match.group(7)
+
+        # Add slight vertical padding (4px top, 6px bottom) so subtitle strokes/descenders
+        # near the red mask border are 100% covered
+        pad_top = 4
+        pad_bot = 6
+        dx = max(2, mx)
+        dy = max(2, my - pad_top)
+        dw = max(4, mw)
+        dh = max(4, mh + pad_top + pad_bot)
+
+        if src_w and src_h:
+            if dx >= src_w - 6:
+                dx = max(2, src_w - 8)
+            if dy >= src_h - 6:
+                dy = max(2, src_h - 8)
+            dw = max(4, min(src_w - dx - 2, dw))
+            dh = max(4, min(src_h - dy - 2, dh))
+
+        return (
+            f"{in_pad}delogo=x={dx}:y={dy}:w={dw}:h={dh}[delogo_m{idx}];"
+            f"[delogo_m{idx}]split=2[orig_m{idx}][tocrop_m{idx}];"
+            f"[tocrop_m{idx}]crop={dw}:{dh}:{dx}:{dy},gblur=sigma=24:steps=2[blurred_m{idx}];"
+            f"[orig_m{idx}][blurred_m{idx}]overlay={dx}:{dy}{out_pad}"
+        )
+
+    fc_upgraded = pattern.sub(_repl, fc_str)
+    fc_upgraded = fc_upgraded.replace('gblur=sigma=15:steps=2', 'gblur=sigma=28:steps=3')
+    return fc_upgraded
+
+
 # -------------------------------------------------------------
 # FFmpeg 1080p 60fps Upgrade Engine
 # -------------------------------------------------------------
@@ -105,6 +170,8 @@ def upgrade_ffmpeg_cmd(args):
         if arg == '-filter_complex' and i + 1 < len(cmd_list):
             has_filter_complex = True
             fc_str = cmd_list[i + 1]
+            # Upgrade mask blur stages to hybrid delogo + high-sigma Gaussian blur
+            fc_str = _upgrade_mask_filters_in_fc(fc_str)
             if '[v]' in fc_str:
                 fc_str_mod = fc_str.replace('[v]', '[v_pre_scale]')
                 fc_str_mod += f"; [v_pre_scale]{enhanced_filter}[v]"
@@ -118,6 +185,7 @@ def upgrade_ffmpeg_cmd(args):
         elif arg == '-vf' and i + 1 < len(cmd_list):
             has_vf = True
             vf_str = cmd_list[i + 1]
+            vf_str = _upgrade_mask_filters_in_fc(vf_str)
             vf_str_mod = vf_str + f",{enhanced_filter}"
             new_cmd.extend(['-vf', vf_str_mod])
             i += 2
@@ -311,8 +379,22 @@ def apply_canvas_transform_to_ffmpeg(cmd_list: list, video_path: str, video_conf
             if arg == '-filter_complex' and i + 1 < len(new_cmd):
                 has_filter_complex = True
                 fc = new_cmd[i + 1]
-                # Prepend canvas transform to video stream
-                if '[0:v]' in fc:
+                # _orig_render_logic computes all mask (crop/delogo/overlay) and anti-copy
+                # coordinates at the SOURCE video resolution (src_w x src_h).
+                # Inject canvas_vf AFTER [v_anticopy] so masks run on native source coordinates first.
+                if '[v_anticopy]; [v_anticopy]' in fc:
+                    fc = fc.replace(
+                        '[v_anticopy]; [v_anticopy]',
+                        f'[v_anticopy]; [v_anticopy]{canvas_vf}[v_canvas_in]; [v_canvas_in]',
+                        1
+                    )
+                elif '[v_anticopy];[v_anticopy]' in fc:
+                    fc = fc.replace(
+                        '[v_anticopy];[v_anticopy]',
+                        f'[v_anticopy];[v_anticopy]{canvas_vf}[v_canvas_in];[v_canvas_in]',
+                        1
+                    )
+                elif '[0:v]' in fc:
                     fc = fc.replace('[0:v]', f'[0:v]{canvas_vf}[v_canvas_in];[v_canvas_in]', 1)
                 else:
                     fc = f"[0:v]{canvas_vf}[v_canvas_out];{fc}"
@@ -349,9 +431,29 @@ def render_logic_with_canvas(video_path, srt_path, audio_path, workspace_dir,
                               status_cb, cancel_event, license_status='expired',
                               video_config=None):
     """
-    Enhanced render_logic that applies canvas transform THEN 1080p upgrade.
+    Enhanced render_logic that normalizes mask_logos/mask_mode, applies canvas transform,
+    and upgrades output to 1080p Full HD 60 FPS.
     """
     license_status = 'premium'
+
+    # Ensure video_config has latest mask_logos and uses high-strength Gaussian Box Blur instead of fragile delogo
+    try:
+        from app.common.config_manager import get_config, set_config
+        saved_ov = dict(get_config('video_overlay', {}) or {})
+        if video_config is None:
+            video_config = dict(saved_ov)
+        else:
+            merged_cfg = dict(saved_ov)
+            merged_cfg.update(video_config)
+            if not merged_cfg.get('mask_logos') and saved_ov.get('mask_logos'):
+                merged_cfg['mask_logos'] = saved_ov['mask_logos']
+            video_config = merged_cfg
+
+        m_mode = str(video_config.get('mask_mode', 'Làm mờ tự nhiên (Khuyên dùng)')).lower()
+        if 'ô vuông' not in m_mode and 'pixelate' not in m_mode and 'đắp' not in m_mode and 'clone' not in m_mode:
+            video_config['mask_mode'] = 'Làm mờ nhòe (Box Blur)'
+    except Exception:
+        pass
 
     announced_hd = [False]
     def wrapped_status_cb2(msg, *a, **kw):
@@ -406,3 +508,5 @@ def render_logic_with_canvas(video_path, srt_path, audio_path, workspace_dir,
 render_logic = render_logic_with_canvas
 _base_mod.render_logic = render_logic_with_canvas
 _base_mod.render_logic_patched = render_logic_with_canvas
+_base_mod.apply_canvas_transform_to_ffmpeg = apply_canvas_transform_to_ffmpeg
+_base_mod._upgrade_mask_filters_in_fc = _upgrade_mask_filters_in_fc

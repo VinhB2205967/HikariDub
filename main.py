@@ -205,14 +205,14 @@ def show_splash_and_check_license(app):
 
     splash = QWidget()
     splash.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-    splash.setFixedSize(540, 160)
+    splash.setFixedSize(560, 168)
     splash.setObjectName("splash")
     splash.setStyleSheet("""
         #splash {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #070714, stop:0.5 #0A0A1E, stop:1 #0D0B22);
-            border: 1px solid #00D4FF;
-            border-radius: 14px;
+                stop:0 #0B1020, stop:0.5 #151B2E, stop:1 #1A1433);
+            border: 1px solid #6366F1;
+            border-radius: 16px;
         }
     """)
 
@@ -220,13 +220,13 @@ def show_splash_and_check_license(app):
     main_layout.setContentsMargins(28, 22, 28, 22)
     main_layout.setSpacing(20)
 
-    # Icon with glow effect container
+    # Icon with gradient glow container
     icon_container = QWidget()
-    icon_container.setFixedSize(72, 72)
+    icon_container.setFixedSize(74, 74)
     icon_container.setStyleSheet("""
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00D4FF22, stop:1 #A855F722);
-        border: 1px solid #00D4FF55;
-        border-radius: 12px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(99, 102, 241, 0.25), stop:1 rgba(236, 72, 153, 0.22));
+        border: 1px solid #8B5CF6;
+        border-radius: 14px;
     """)
     icon_inner = QHBoxLayout(icon_container)
     icon_inner.setContentsMargins(4, 4, 4, 4)
@@ -237,28 +237,27 @@ def show_splash_and_check_license(app):
         icon_pixmap = QPixmap(png_path).scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         icon_label.setPixmap(icon_pixmap)
     else:
-        # Fallback: Japanese kanji for "light" (hikari)
         icon_label.setText("光")
-        icon_label.setStyleSheet("color: #00D4FF; font-size: 36px; font-weight: bold;")
+        icon_label.setStyleSheet("color: #22D3EE; font-size: 36px; font-weight: bold;")
     icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     icon_inner.addWidget(icon_label)
     main_layout.addWidget(icon_container)
 
-    # Vertical separator
+    # Vertical gradient separator
     sep = QFrame()
     sep.setFrameShape(QFrame.Shape.VLine)
     sep.setFixedWidth(1)
-    sep.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 transparent,stop:0.3 #00D4FF,stop:0.7 #A855F7,stop:1 transparent); border: none;")
+    sep.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 transparent,stop:0.3 #06B6D4,stop:0.7 #EC4899,stop:1 transparent); border: none;")
     main_layout.addWidget(sep)
 
     text_layout = QVBoxLayout()
     text_layout.setSpacing(6)
 
-    # App name with futuristic styling
+    # App name with Modern SaaS styling
     title_label = QLabel("HIKARI TSUKIMI")
     title_label.setStyleSheet("""
-        color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00D4FF, stop:1 #A855F7);
-        font-size: 26px;
+        color: #F8FAFC;
+        font-size: 25px;
         font-weight: 800;
         font-family: 'Segoe UI Variable Display', 'Segoe UI', Arial;
         letter-spacing: 3px;
@@ -266,39 +265,39 @@ def show_splash_and_check_license(app):
     text_layout.addWidget(title_label)
 
     # Subtitle — Japanese + Vietnamese bilingual
-    ver_label = QLabel(f"v{APP_VERSION}  •  AI Dubbing Studio  •  月見の光")
+    ver_label = QLabel(f"v{APP_VERSION}  •  AI Dubbing & Creative Studio  •  月見の光")
     ver_label.setStyleSheet("""
-        color: #A855F7;
+        color: #A78BFA;
         font-size: 12px;
-        font-weight: 600;
-        font-family: 'Segoe UI', Arial;
-        letter-spacing: 1px;
+        font-weight: 700;
+        font-family: 'Segoe UI Variable Text', 'Segoe UI', Arial;
+        letter-spacing: 0.8px;
     """)
     text_layout.addWidget(ver_label)
 
-    # Thin neon separator line
+    # Thin gradient separator line
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFixedHeight(1)
-    line.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #00D4FF66,stop:0.5 #A855F766,stop:1 transparent); border: none;")
+    line.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6366F1,stop:0.5 #EC4899,stop:1 transparent); border: none;")
     text_layout.addWidget(line)
 
-    status_label = QLabel("⚡ Đang khởi động hệ thống AI ngoại tuyến...")
+    status_label = QLabel("⚡ Đang khởi tạo không gian xử lý AI đa phương tiện...")
     status_label.setStyleSheet("""
-        color: #64748B;
+        color: #94A3B8;
         font-size: 11px;
-        font-style: italic;
-        font-family: 'Segoe UI', Arial;
+        font-family: 'Segoe UI Variable Text', 'Segoe UI', Arial;
     """)
     text_layout.addWidget(status_label)
 
     # Product status badge
-    status_badge = QLabel("✦ HIKARI TSUKIMI • AI Dubbing Studio")
+    status_badge = QLabel("✦ MODERN SAAS CREATIVE ENGINE • SẴN SÀNG")
     status_badge.setStyleSheet("""
-        color: #10B981;
+        color: #22D3EE;
         font-size: 10px;
-        font-family: 'Segoe UI', Arial;
-        letter-spacing: 0.5px;
+        font-weight: 700;
+        font-family: 'Segoe UI Variable Text', 'Segoe UI', Arial;
+        letter-spacing: 0.6px;
     """)
     text_layout.addWidget(status_badge)
 
@@ -377,9 +376,9 @@ if __name__ == '__main__':
         except Exception:
             pass
 
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
     from PyQt6.QtCore import Qt, QSize, QTimer
-    from PyQt6.QtGui import QIcon, QColor, QPalette
+    from PyQt6.QtGui import QIcon, QColor, QPalette, QPainter
     from qfluentwidgets import (
         setTheme, Theme, setThemeColor, qconfig,
         FluentWindow, NavigationItemPosition, SplashScreen, FluentIcon as FIF,
@@ -391,170 +390,11 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
-    qconfig.set(qconfig.themeMode, Theme.DARK, save=False)
-    setTheme(Theme.DARK)
-
-    fixed_color = QColor('#22D3EE')
-    qconfig.set(qconfig.themeColor, fixed_color, save=False)
-    setThemeColor(fixed_color)
-
-    # Deep midnight creative studio palette — Hikari Dub v3.0
-    dark_palette = QPalette()
-    dark_palette.setColor(QPalette.ColorRole.Window, QColor('#0B0D12'))
-    dark_palette.setColor(QPalette.ColorRole.WindowText, QColor('#F1F5F9'))
-    dark_palette.setColor(QPalette.ColorRole.Base, QColor('#080A0F'))
-    dark_palette.setColor(QPalette.ColorRole.AlternateBase, QColor('#121620'))
-    dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor('#10131B'))
-    dark_palette.setColor(QPalette.ColorRole.ToolTipText, QColor('#22D3EE'))
-    dark_palette.setColor(QPalette.ColorRole.Text, QColor('#F1F5F9'))
-    dark_palette.setColor(QPalette.ColorRole.Button, QColor('#191F2B'))
-    dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor('#F1F5F9'))
-    dark_palette.setColor(QPalette.ColorRole.BrightText, QColor('#22D3EE'))
-    dark_palette.setColor(QPalette.ColorRole.Link, QColor('#22D3EE'))
-    dark_palette.setColor(QPalette.ColorRole.Highlight, QColor('#22D3EE'))
-    dark_palette.setColor(QPalette.ColorRole.HighlightedText, QColor('#0B0D12'))
-    app.setPalette(dark_palette)
-    setTheme(Theme.DARK)
-
-    # Hikari Dub v3.0 Design System Stylesheet
-    app.setStyleSheet("""
-        QWidget {
-            font-family: 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', sans-serif;
-            color: #F1F5F9;
-        }
-        
-        /* Navigation Sidebar Styling */
-        NavigationPanel, NavigationInterface {
-            background-color: #10131B;
-            border-right: 1px solid #293244;
-        }
-        NavigationTreeItem, NavigationToolButton {
-            background-color: transparent;
-            color: #94A3B8;
-            border-radius: 6px;
-            font-weight: 500;
-        }
-        NavigationTreeItem:hover, NavigationToolButton:hover {
-            background-color: #191F2B;
-            color: #F1F5F9;
-        }
-        
-        /* Input & Controls */
-        LineEdit, TextEdit {
-            background-color: #080A0F;
-            color: #F1F5F9;
-            border: 1px solid #293244;
-            border-radius: 6px;
-            padding: 5px 10px;
-            selection-background-color: #22D3EE;
-            selection-color: #0B0D12;
-        }
-        LineEdit:focus, TextEdit:focus {
-            border: 1px solid #22D3EE;
-        }
-        
-        /* Buttons */
-        PushButton {
-            background-color: #191F2B;
-            color: #F1F5F9;
-            border: 1px solid #293244;
-            border-radius: 6px;
-            font-weight: 500;
-            padding: 6px 12px;
-        }
-        PushButton:hover {
-            background-color: #222A39;
-            border: 1px solid #22D3EE;
-            color: #22D3EE;
-        }
-        PushButton:pressed {
-            background-color: #121620;
-        }
-        
-        PrimaryPushButton {
-            background-color: #22D3EE;
-            color: #0B0D12;
-            font-weight: 700;
-            border: 1px solid #06B6D4;
-            border-radius: 6px;
-            padding: 7px 16px;
-        }
-        PrimaryPushButton:hover {
-            background-color: #38BDF8;
-            border: 1px solid #22D3EE;
-        }
-        PrimaryPushButton:pressed {
-            background-color: #0891B2;
-        }
-        PrimaryPushButton:disabled {
-            background-color: #191F2B;
-            color: #475569;
-            border: 1px solid #293244;
-        }
-        
-        /* Progress Bar */
-        ProgressBar {
-            background-color: #121620;
-            border: 1px solid #293244;
-            border-radius: 4px;
-            text-align: center;
-            color: #22D3EE;
-            font-weight: bold;
-        }
-        ProgressBar::chunk {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #22D3EE, stop:1 #8B5CF6);
-            border-radius: 3px;
-        }
-        
-        /* Smooth ScrollBars */
-        QScrollBar:vertical {
-            background: #080A0F;
-            width: 6px;
-            border-radius: 3px;
-            margin: 0;
-        }
-        QScrollBar::handle:vertical {
-            background: #293244;
-            border-radius: 3px;
-            min-height: 24px;
-        }
-        QScrollBar::handle:vertical:hover {
-            background: #22D3EE;
-        }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-        
-        QScrollBar:horizontal {
-            background: #080A0F;
-            height: 6px;
-            border-radius: 3px;
-            margin: 0;
-        }
-        QScrollBar::handle:horizontal {
-            background: #293244;
-            border-radius: 3px;
-            min-width: 24px;
-        }
-        QScrollBar::handle:horizontal:hover {
-            background: #22D3EE;
-        }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
-        
-        /* Tooltip */
-        QToolTip {
-            background: #10131B;
-            color: #22D3EE;
-            border: 1px solid #22D3EE;
-            border-radius: 6px;
-            padding: 5px 9px;
-            font-size: 12px;
-        }
-        
-        QStatusBar {
-            background: #0B0D12;
-            color: #94A3B8;
-            border-top: 1px solid #293244;
-        }
-    """)
+    # Install Modern SaaS • Premium UI • Creative Technology Design System
+    from app.common.design_system import install_design_system, Colors
+    from app.components.modern_effects import ModernHeaderBar, paint_ambient_background
+    from app.common.view_enhancer import enhance_all_views
+    install_design_system(app)
 
     # Load custom fonts
     try:
@@ -602,7 +442,12 @@ if __name__ == '__main__':
             super().__init__()
             self.license_status = lic_status
             self.license_msg = lic_msg
+            try:
+                self.setMicaEffectEnabled(False)
+            except Exception:
+                pass
             self.initWindow()
+            self._setup_modern_header()
 
             self.homeInterface = HomeInterface(self)
             self.homeInterface.license_status = lic_status
@@ -620,17 +465,135 @@ if __name__ == '__main__':
             self.dictInterface = DictionaryInterface(self)
 
             self.initNavigation()
+            enhance_all_views(self)
             self.splashScreen.finish()
 
             QTimer.singleShot(1500, self.show_ready_notification)
 
+        def _setup_modern_header(self):
+            """Integrates the Modern SaaS Top Header Bar above the main stackedWidget."""
+            try:
+                self.modernHeader = ModernHeaderBar(self)
+                self.modernHeader.open_output_requested.connect(self._on_quick_open_output)
+                self.modernHeader.go_settings_requested.connect(self._on_quick_go_settings)
+                self.modernHeader.go_home_requested.connect(self._on_quick_go_home)
+
+                if hasattr(self, 'widgetLayout') and hasattr(self, 'stackedWidget'):
+                    self.widgetLayout.setContentsMargins(0, 38, 0, 0)
+                    self.widgetLayout.removeWidget(self.stackedWidget)
+
+                    self._workspace_container = QWidget(self)
+                    self._workspace_container.setObjectName("hikariWorkspaceContainer")
+                    self._workspace_container.setStyleSheet("#hikariWorkspaceContainer { background: transparent; border: none; }")
+                    vbox = QVBoxLayout(self._workspace_container)
+                    vbox.setContentsMargins(0, 0, 0, 0)
+                    vbox.setSpacing(0)
+                    vbox.addWidget(self.modernHeader)
+                    vbox.addWidget(self.stackedWidget, 1)
+                    self.widgetLayout.addWidget(self._workspace_container, 1)
+
+                    self.stackedWidget.currentChanged.connect(self._on_page_switched)
+            except Exception as e:
+                print(f"Lỗi khởi tạo ModernHeaderBar: {e}")
+
+        def _on_page_switched(self, idx: int):
+            if not hasattr(self, 'modernHeader'):
+                return
+            w = self.stackedWidget.widget(idx)
+            page_meta = {
+                getattr(self, 'homeInterface', None): (
+                    "🎬", "BẢNG ĐIỀU KHIỂN STUDIO",
+                    "Không gian xử lý Video AI, Phụ đề & Lồng tiếng đa ngôn ngữ tự động"
+                ),
+                getattr(self, 'libraryInterface', None): (
+                    "🎞️", "THƯ VIỆN DỰ ÁN VIDEO",
+                    "Quản lý, xem trước và xuất bản các dự án video đã hoàn tất"
+                ),
+                getattr(self, 'highlightInterface', None): (
+                    "✨", "CẮT HIGHLIGHT TỰ ĐỘNG",
+                    "Trích xuất phân cảnh nổi bật thông minh từ video dài"
+                ),
+                getattr(self, 'splitterInterface', None): (
+                    "✂️", "CHIA TẬP VIDEO THÔNG MINH",
+                    "Tự động cắt chia video dài thành nhiều phần chuẩn thời lượng"
+                ),
+                getattr(self, 'mergerInterface', None): (
+                    "🔗", "GHÉP NỐI NHIỀU VIDEO",
+                    "Gộp hàng loạt video tốc độ cao với tỷ lệ khung hình & FPS đồng nhất"
+                ),
+                getattr(self, 'douyinInterface', None): (
+                    "🌐", "TẢI VIDEO ĐA NỀN TẢNG",
+                    "Tải video chất lượng gốc không logo từ Douyin, TikTok và Bilibili"
+                ),
+                getattr(self, 'ttsInterface', None): (
+                    "🎙️", "PHÒNG THU GIỌNG ĐỌC AI",
+                    "Chuyển đổi văn bản thành giọng nói tự nhiên đa ngôn ngữ"
+                ),
+                getattr(self, 'dictInterface', None): (
+                    "📖", "TỪ ĐIỂN PHÁT ÂM TÙY CHỈNH",
+                    "Thiết lập quy tắc phiên âm chuyên biệt cho bộ máy đọc AI"
+                ),
+                getattr(self, 'reportInterface', None): (
+                    "💬", "TRUNG TÂM HỖ TRỢ & BÁO LỖI",
+                    "Gửi phản hồi kỹ thuật và trao đổi trực tiếp với đội ngũ phát triển"
+                ),
+                getattr(self, 'settingInterface', None): (
+                    "⚙️", "CÀI ĐẶT HỆ THỐNG & MODEL AI",
+                    "Quản lý mô hình Whisper, OCR, tách nhạc nền và hiệu năng phần cứng"
+                ),
+            }
+            meta = page_meta.get(w)
+            if meta:
+                self.modernHeader.set_page_info(*meta)
+            try:
+                if hasattr(self, 'navigationInterface') and self.navigationInterface:
+                    self.navigationInterface.setEnabled(True)
+            except Exception:
+                pass
+
+        def _on_quick_go_home(self):
+            try:
+                if hasattr(self, 'navigationInterface') and self.navigationInterface:
+                    self.navigationInterface.setEnabled(True)
+                if hasattr(self, 'homeInterface'):
+                    self.switchTo(self.homeInterface)
+            except Exception:
+                pass
+
+        def _on_quick_open_output(self):
+            try:
+                out_dir = ""
+                if hasattr(self, 'homeInterface') and hasattr(self.homeInterface, 'line_output_path'):
+                    out_dir = self.homeInterface.line_output_path.text().strip()
+                if out_dir and os.path.exists(out_dir):
+                    os.startfile(out_dir)
+                else:
+                    self.switchTo(self.libraryInterface)
+            except Exception:
+                pass
+
+        def _on_quick_go_settings(self):
+            try:
+                if hasattr(self, 'navigationInterface') and self.navigationInterface:
+                    self.navigationInterface.setEnabled(True)
+                if hasattr(self, 'settingInterface'):
+                    self.switchTo(self.settingInterface)
+            except Exception:
+                pass
+
+        def paintEvent(self, e):
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            paint_ambient_background(self, p)
+            p.end()
+
         def show_ready_notification(self):
             InfoBar.success(
-                title='✦ HIKARI TSUKIMI',
-                content='Ứng dụng đã sẵn sàng.',
+                title='✦ HIKARI TSUKIMI STUDIO',
+                content='Hệ thống AI ngoại tuyến và giao diện Creative Studio đã sẵn sàng.',
                 parent=self,
                 position=InfoBarPosition.TOP,
-                duration=6000
+                duration=5000
             )
 
         def initNavigation(self):
@@ -653,11 +616,11 @@ if __name__ == '__main__':
                 except Exception:
                     pass
 
-            # Style navigation indicator with electric cyan accent
+            # Style navigation indicator with Electric Blue / Cyan accent
             try:
                 ind = [c for c in self.navigationInterface.findChildren(object) if 'indicator' in c.metaObject().className().lower()]
                 if ind:
-                    ind[0].setIndicatorColor(QColor('#22D3EE'), QColor('#22D3EE'))
+                    ind[0].setIndicatorColor(QColor(Colors.PRIMARY), QColor(Colors.ACCENT_BRIGHT))
             except Exception:
                 pass
 
@@ -667,7 +630,7 @@ if __name__ == '__main__':
                 self.navigationInterface.panel.setReturnButtonVisible(False)
 
         def initWindow(self):
-            self.resize(1280, 780)
+            self.resize(1320, 810)
             icon_path = get_icon_path()
             png_path = get_png_icon_path()
             
@@ -683,11 +646,13 @@ if __name__ == '__main__':
                     self.titleBar.iconLabel.setVisible(True)
                     self.titleBar.iconLabel.setFixedSize(22, 22)
                 if hasattr(self.titleBar, 'titleLabel'):
-                    self.titleBar.titleLabel.setStyleSheet("color: #22D3EE; font-weight: 700; font-size: 13px; letter-spacing: 0.5px;")
+                    self.titleBar.titleLabel.setStyleSheet(
+                        f"color: {Colors.TEXT_PRIMARY}; font-weight: 800; font-size: 12px; letter-spacing: 0.8px;"
+                    )
 
             if os.path.exists(icon_path):
                 force_native_taskbar_icon(self, icon_path)
-            self.setWindowTitle(f"Hikari Tsukimi v{APP_VERSION} — AI Dubbing Studio")
+            self.setWindowTitle(f"Hikari Tsukimi v{APP_VERSION} — AI Dubbing & Creative Studio")
             
             desktop = QApplication.primaryScreen().availableGeometry()
             w, h = desktop.width(), desktop.height()

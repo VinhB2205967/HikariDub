@@ -164,13 +164,18 @@ def save_transform(transform: CanvasTransform, path: Optional[str] = None) -> No
 
 
 def load_transform(path: Optional[str] = None) -> CanvasTransform:
-    """Load transform state from JSON file; return default if not found."""
+    """Load transform state from JSON file; always start with 100% video zoom and centered position."""
     fpath = path or _DEFAULT_CONFIG_PATH
     if os.path.exists(fpath):
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return CanvasTransform.from_dict(data)
+            t = CanvasTransform.from_dict(data)
+            t.video_scale = 1.0
+            t.pos_x = 0.0
+            t.pos_y = 0.0
+            t.rotation = 0.0
+            return t
         except Exception:
             pass
     return CanvasTransform()
