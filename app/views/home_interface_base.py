@@ -1,0 +1,450 @@
+"""
+Base HomeInterface Module - Pure Python Edition (Hikari Tsukimi Studio).
+Provides the 3-column AI Dubbing Studio workspace without any .pyc dependency.
+"""
+
+import os
+import threading
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QScrollArea, QStackedWidget, QListWidget, QFileDialog
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from qfluentwidgets import (
+    PrimaryPushButton, PushButton, ComboBox, LineEdit, PlainTextEdit,
+    ProgressBar, Pivot, InfoBar, InfoBarPosition, FluentIcon as FIF
+)
+
+from app.common.design_system import Colors
+from app.common.config_manager import get_config, set_config
+
+
+class _TranscribeWorker(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    finished_srt = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, video_path: str, workspace_dir: str, model_size: str = "small", parent=None):
+        super().__init__(parent)
+        self.video_path = video_path
+        self.workspace_dir = workspace_dir
+        self.model_size = model_size
+
+    def run(self):
+        try:
+            import pysrt
+            from faster_whisper import WhisperModel
+            import torch
+
+            os.makedirs(self.workspace_dir, exist_ok=True)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            self.log.emit(f"Đang nạp Whisper ({self.model_size}, {device})...")
+            self.progress.emit(15)
+
+            model = WhisperModel(self.model_size, device=device, compute_type=compute_type)
+            self.log.emit("Đang bóc băng lời thoại...")
+            segments, _ = model.transcribe(self.video_path, vad_filter=True)
+
+            subs = pysrt.SubRipFile()
+            for idx, seg in enumerate(segments, 1):
+                start = pysrt.SubRipTime(seconds=seg.start)
+                end = pysrt.SubRipTime(seconds=seg.end)
+                subs.append(pysrt.SubRipItem(idx, start, end, seg.text.strip()))
+
+            base = os.path.splitext(os.path.basename(self.video_path))[0]
+            out_srt = os.path.join(self.workspace_dir, f"{base}_orig.srt")
+            subs.save(out_srt, encoding="utf-8")
+            self.progress.emit(100)
+            self.finished_srt.emit(out_srt)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class _TTSWorker(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    finished_audio = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, srt_path: str, workspace_dir: str, voice_model: str = "banmai", parent=None):
+        super().__init__(parent)
+        self.srt_path = srt_path
+        self.workspace_dir = workspace_dir
+        self.voice_model = voice_model
+        self._cancel = threading.Event()
+
+    def run(self):
+        try:
+            from app.core.audio_generator import generate_audio_logic
+            temp_files = []
+            out_wav = generate_audio_logic(
+                self.srt_path, "", self.voice_model,
+                lambda m: self.log.emit(str(m)),
+                self._cancel, temp_files, self.workspace_dir, "Tiếng Việt", 1.35
+            )
+            self.progress.emit(100)
+            if out_wav and os.path.exists(out_wav):
+                self.finished_audio.emit(out_wav)
+            else:
+                self.error.emit("Không tạo được file âm thanh lồng tiếng.")
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class _RenderWorker(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    finished_video = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, video_path: str, srt_path: str, audio_path: str, workspace_dir: str, parent=None):
+        super().__init__(parent)
+        self.video_path = video_path
+        self.srt_path = srt_path
+        self.audio_path = audio_path
+        self.workspace_dir = workspace_dir
+        self._cancel = threading.Event()
+
+    def run(self):
+        try:
+            from app.core.video_renderer import render_logic
+            out_mp4 = render_logic(
+                self.video_path, self.srt_path, self.audio_path, self.workspace_dir,
+                lambda m: self.log.emit(str(m)), self._cancel, "premium", None
+            )
+            self.progress.emit(100)
+            if out_mp4 and os.path.exists(out_mp4):
+                self.finished_video.emit(out_mp4)
+            else:
+                self.error.emit("Không xuất được video.")
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+SrtListWidget = QListWidget
+
+
+class SrtItemWidget(QWidget):
+    """Subtitle item widget."""
+
+    def __init__(self, index: int = 0, start: str = "", end: str = "", text: str = "", parent=None):
+        super().__init__(parent)
+        self.index = index
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 4, 6, 4)
+        self.lbl_time = QLabel(f"[{index}] {start} -> {end}", self)
+        self.lbl_text = QLabel(text, self)
+        self.lbl_text.setWordWrap(True)
+        lay.addWidget(self.lbl_time)
+        lay.addWidget(self.lbl_text)
+
+
+class HomeInterface(QWidget):
+    """Pure-Python 3-column Studio Workspace."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("homeInterface")
+        self.license_status = "premium"
+        self._video_paths = []
+        self._orig_srt_path = ""
+        self._trans_srt_path = ""
+        self._audio_path = ""
+        self._workers = []
+
+        root = QHBoxLayout(self)
+        self.hBoxLayout = root
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(12)
+
+        # ── Column 1: Controls ──
+        self.col1_widget = QFrame(self)
+        self.col1_widget.setMinimumWidth(330)
+        self.col1_widget.setMaximumWidth(390)
+        col1_outer = QVBoxLayout(self.col1_widget)
+        col1_outer.setContentsMargins(0, 0, 0, 0)
+
+        self.col1_scroll = QScrollArea(self.col1_widget)
+        self.col1_scroll.setWidgetResizable(True)
+        self.col1_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.col1_container = QWidget()
+        self.col1_layout = QVBoxLayout(self.col1_container)
+        self.col1_layout.setContentsMargins(12, 12, 12, 12)
+        self.col1_layout.setSpacing(10)
+
+        # Video & Output selection
+        self.btn_select_video = PrimaryPushButton(FIF.VIDEO, "Chọn Video Nguồn", self.col1_container)
+        self.btn_select_video.clicked.connect(self._onSelectVideo)
+        self.col1_layout.addWidget(self.btn_select_video)
+
+        self.video_combo = ComboBox(self.col1_container)
+        self.col1_layout.addWidget(self.video_combo)
+
+        out_row = QHBoxLayout()
+        self.line_output_path = LineEdit(self.col1_container)
+        self.line_output_path.setText(get_config("output_dir", os.path.join(os.getcwd(), "Output")))
+        self.btn_select_output = PushButton(FIF.FOLDER, "Lưu...", self.col1_container)
+        self.btn_select_output.clicked.connect(self._onSelectOutput)
+        out_row.addWidget(self.line_output_path, 1)
+        out_row.addWidget(self.btn_select_output)
+        self.col1_layout.addLayout(out_row)
+
+        # Translation settings
+        self.combo_target_lang = ComboBox(self.col1_container)
+        self.combo_target_lang.addItems(["Tiếng Việt", "English", "中文", "日本語", "한국어"])
+        self.col1_layout.addWidget(self.combo_target_lang)
+
+        self.combo_prompt = ComboBox(self.col1_container)
+        self.combo_prompt.addItem("Mặc định", userData="Mặc định")
+        self.col1_layout.addWidget(self.combo_prompt)
+
+        self.text_custom_prompt = PlainTextEdit(self.col1_container)
+        self.text_custom_prompt.setPlaceholderText("Ghi chú phong cách dịch (tùy chọn)...")
+        self.text_custom_prompt.setMaximumHeight(70)
+        self.col1_layout.addWidget(self.text_custom_prompt)
+
+        # Pipeline step buttons
+        self.btn_step1 = PushButton(FIF.MICROPHONE, "1. Bóc Băng (STT)", self.col1_container)
+        self.btn_step1.clicked.connect(self._onStep1Clicked)
+        self.col1_layout.addWidget(self.btn_step1)
+
+        self.btn_step2 = PushButton(FIF.LANGUAGE, "2. Dịch Kịch Bản", self.col1_container)
+        self.btn_step2.clicked.connect(self._onTranslateClicked)
+        self.col1_layout.addWidget(self.btn_step2)
+
+        self.btn_step3 = PushButton(FIF.VOLUME, "3. Tạo Giọng Đọc", self.col1_container)
+        self.btn_step3.clicked.connect(self._onVoiceClicked)
+        self.col1_layout.addWidget(self.btn_step3)
+
+        self.btn_step4 = PrimaryPushButton(FIF.MOVIE, "4. Render Video", self.col1_container)
+        self.btn_step4.clicked.connect(self._onStep4Clicked)
+        self.col1_layout.addWidget(self.btn_step4)
+
+        full_row = QHBoxLayout()
+        self.btn_start_full = PrimaryPushButton(FIF.PLAY, "Chạy Tự Động", self.col1_container)
+        self.btn_cancel = PushButton(FIF.CANCEL, "Hủy", self.col1_container)
+        full_row.addWidget(self.btn_start_full, 1)
+        full_row.addWidget(self.btn_cancel)
+        self.col1_layout.addLayout(full_row)
+
+        # Secondary utility buttons expected by patches
+        util_row = QHBoxLayout()
+        self.btn_paste_transcript = PushButton("Dán Kịch Bản", self.col1_container)
+        self.btn_upload_transcript = PushButton("Nạp SRT", self.col1_container)
+        self.btn_upload_transcript.clicked.connect(self._onUploadSRT)
+        util_row.addWidget(self.btn_paste_transcript)
+        util_row.addWidget(self.btn_upload_transcript)
+        self.col1_layout.addLayout(util_row)
+
+        ov_row = QHBoxLayout()
+        self.btn_add_mask = PushButton("Thêm Vùng Mờ", self.col1_container)
+        self.btn_add_logo = PushButton("Thêm Logo", self.col1_container)
+        self.btn_add_bg_frame = PushButton("Khung Nền", self.col1_container)
+        self.btn_remove_item = PushButton("Xóa", self.col1_container)
+        self.btn_style = PushButton("Kiểu Chữ", self.col1_container)
+        self.btn_apply_all = PushButton("Áp Dụng", self.col1_container)
+        ov_row.addWidget(self.btn_add_mask)
+        ov_row.addWidget(self.btn_add_logo)
+        self.col1_layout.addLayout(ov_row)
+
+        self.line_wm = LineEdit(self.col1_container)
+        self.line_wm.setPlaceholderText("Watermark (tùy chọn)...")
+        self.line_wm.hide()
+        self.btn_add_bg_frame.hide()
+        self.btn_remove_item.hide()
+        self.btn_style.hide()
+        self.btn_apply_all.hide()
+
+        self.col1_layout.addStretch(1)
+        self.col1_scroll.setWidget(self.col1_container)
+        col1_outer.addWidget(self.col1_scroll)
+        root.addWidget(self.col1_widget)
+
+        # ── Column 2: Preview & Log ──
+        self.col2_widget = QFrame(self)
+        self.col2_layout = QVBoxLayout(self.col2_widget)
+        self.col2_layout.setContentsMargins(12, 12, 12, 12)
+        self.col2_layout.setSpacing(10)
+
+        self.video_frame = QFrame(self.col2_widget)
+        self.video_frame.setMinimumHeight(320)
+        self.video_frame.setStyleSheet("QFrame { background: #0B0F1A; border: 1px solid #1E293B; border-radius: 10px; }")
+        vf_lay = QVBoxLayout(self.video_frame)
+        vf_lay.setContentsMargins(0, 0, 0, 0)
+        self.video_canvas = QLabel("Chọn video để xem trước & xử lý", self.video_frame)
+        self.video_canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_canvas.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 13px; border: none;")
+        vf_lay.addWidget(self.video_canvas, 1)
+        self.col2_layout.addWidget(self.video_frame, 3)
+
+        self.progress_bar = ProgressBar(self.col2_widget)
+        self.progress_bar.setValue(0)
+        self.col2_layout.addWidget(self.progress_bar)
+
+        self.log_text_edit = PlainTextEdit(self.col2_widget)
+        self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setPlaceholderText("Nhật ký xử lý AI...")
+        self.col2_layout.addWidget(self.log_text_edit, 1)
+        root.addWidget(self.col2_widget, 2)
+
+        # ── Column 3: Subtitles ──
+        self.col3_widget = QFrame(self)
+        self.col3_widget.setMinimumWidth(280)
+        self.col3_widget.setMaximumWidth(360)
+        self.col3_layout = QVBoxLayout(self.col3_widget)
+        self.col3_layout.setContentsMargins(12, 12, 12, 12)
+        self.col3_layout.setSpacing(8)
+
+        self.srt_pivot = Pivot(self.col3_widget)
+        self.srt_stacked_widget = QStackedWidget(self.col3_widget)
+        self.srt_orig_list = QListWidget(self.col3_widget)
+        self.srt_trans_list = QListWidget(self.col3_widget)
+        self.srt_stacked_widget.addWidget(self.srt_orig_list)
+        self.srt_stacked_widget.addWidget(self.srt_trans_list)
+        self.srt_pivot.addItem("orig", "Phụ Đề Gốc", lambda: self.srt_stacked_widget.setCurrentWidget(self.srt_orig_list))
+        self.srt_pivot.addItem("trans", "Phụ Đề Dịch", lambda: self.srt_stacked_widget.setCurrentWidget(self.srt_trans_list))
+        self.srt_pivot.setCurrentItem("orig")
+        self.col3_layout.addWidget(self.srt_pivot)
+        self.col3_layout.addWidget(self.srt_stacked_widget, 1)
+
+        srt_btn_row = QHBoxLayout()
+        self.btn_replace_all = PushButton("Thay Thế", self.col3_widget)
+        self.btn_save_srt = PushButton(FIF.SAVE, "Lưu SRT", self.col3_widget)
+        srt_btn_row.addWidget(self.btn_replace_all)
+        srt_btn_row.addWidget(self.btn_save_srt)
+        self.col3_layout.addLayout(srt_btn_row)
+        root.addWidget(self.col3_widget)
+
+    def _appendLog(self, msg: str):
+        if hasattr(self, "log_text_edit"):
+            self.log_text_edit.appendPlainText(str(msg))
+
+    def get_active_video_path(self) -> str:
+        idx = self.video_combo.currentIndex()
+        if 0 <= idx < len(self._video_paths):
+            return self._video_paths[idx]
+        return ""
+
+    def get_active_workspace(self) -> str:
+        out = self.line_output_path.text().strip() or os.path.join(os.getcwd(), "Output")
+        os.makedirs(out, exist_ok=True)
+        return out
+
+    def get_current_srt_path(self) -> str:
+        return self._trans_srt_path or self._orig_srt_path
+
+    def _onSelectVideo(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Chọn Video", "", "Video Files (*.mp4 *.mkv *.mov *.avi)")
+        if files:
+            self._video_paths = files
+            self.video_combo.clear()
+            for f in files:
+                self.video_combo.addItem(os.path.basename(f), userData=f)
+            self._appendLog(f"Đã nạp {len(files)} video.")
+
+    def _onSelectOutput(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn Thư Mục Lưu", self.line_output_path.text().strip())
+        if folder:
+            self.line_output_path.setText(folder)
+            set_config("output_dir", folder)
+
+    def _onUploadSRT(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn File SRT", "", "Subtitle Files (*.srt)")
+        if p:
+            self._orig_srt_path = p
+            self._load_srt_to_list(p, self.srt_orig_list)
+            self._appendLog(f"Đã nạp phụ đề: {p}")
+
+    def _load_srt_to_list(self, srt_path: str, lw: QListWidget):
+        lw.clear()
+        try:
+            import pysrt
+            subs = pysrt.open(srt_path, encoding="utf-8")
+            for s in subs:
+                lw.addItem(f"[{s.index}] {s.start} -> {s.end}\n{s.text}")
+        except Exception as e:
+            self._appendLog(f"Lỗi đọc SRT: {e}")
+
+    def _onStep1Clicked(self):
+        vp = self.get_active_video_path()
+        if not vp or not os.path.exists(vp):
+            InfoBar.warning("Thiếu video", "Vui lòng chọn video nguồn trước.", parent=self, position=InfoBarPosition.TOP)
+            return
+        w = _TranscribeWorker(vp, self.get_active_workspace(), get_config("whisper_model", "small"), self)
+        w.progress.connect(self.progress_bar.setValue)
+        w.log.connect(self._appendLog)
+        w.finished_srt.connect(self._onTranscribeFinished)
+        w.error.connect(self._onTranscribeError)
+        self._workers.append(w)
+        w.start()
+
+    def _onTranscribeFinished(self, srt_path: str):
+        self._orig_srt_path = srt_path
+        self._load_srt_to_list(srt_path, self.srt_orig_list)
+        self._appendLog(f"Bóc băng hoàn tất: {srt_path}")
+        InfoBar.success("Hoàn tất", "Đã bóc băng phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
+
+    def _onTranscribeError(self, err: str):
+        self._appendLog(f"[LỖI] {err}")
+        InfoBar.error("Lỗi", str(err), parent=self, position=InfoBarPosition.TOP)
+
+    def _onTranslateClicked(self):
+        pass  # Overridden by home_interface.py patch
+
+    def _onTranslateFinished(self, srt_path: str):
+        self._trans_srt_path = srt_path
+        self._load_srt_to_list(srt_path, self.srt_trans_list)
+        self.srt_pivot.setCurrentItem("trans")
+        self.srt_stacked_widget.setCurrentWidget(self.srt_trans_list)
+        self._appendLog(f"Dịch hoàn tất: {srt_path}")
+        InfoBar.success("Hoàn tất", "Đã dịch phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
+
+    def _onVoiceClicked(self):
+        srt = self.get_current_srt_path()
+        if not srt or not os.path.exists(srt):
+            InfoBar.warning("Thiếu phụ đề", "Vui lòng bóc băng hoặc nạp file SRT trước.", parent=self, position=InfoBarPosition.TOP)
+            return
+        w = _TTSWorker(srt, self.get_active_workspace(), get_config("tts_voice", "banmai"), self)
+        w.progress.connect(self.progress_bar.setValue)
+        w.log.connect(self._appendLog)
+        w.finished_audio.connect(self._onVoiceFinished)
+        w.error.connect(self._onTranscribeError)
+        self._workers.append(w)
+        w.start()
+
+    def _onVoiceFinished(self, wav_path: str):
+        self._audio_path = wav_path
+        self._appendLog(f"Tạo giọng đọc hoàn tất: {wav_path}")
+        InfoBar.success("Hoàn tất", "Đã tạo giọng đọc xong!", parent=self, position=InfoBarPosition.TOP)
+
+    def _onStep4Clicked(self):
+        vp = self.get_active_video_path()
+        if not vp or not os.path.exists(vp):
+            InfoBar.warning("Thiếu video", "Vui lòng chọn video nguồn trước.", parent=self, position=InfoBarPosition.TOP)
+            return
+        w = _RenderWorker(vp, self.get_current_srt_path(), self._audio_path, self.get_active_workspace(), self)
+        w.progress.connect(self.progress_bar.setValue)
+        w.log.connect(self._appendLog)
+        w.finished_video.connect(self._onRenderFinished)
+        w.error.connect(self._onTranscribeError)
+        self._workers.append(w)
+        w.start()
+
+    def _onRenderFinished(self, mp4_path: str):
+        self._appendLog(f"Xuất video hoàn tất: {mp4_path}")
+        InfoBar.success("Thành công", f"Đã xuất video: {os.path.basename(mp4_path)}", parent=self, position=InfoBarPosition.TOP)
+
+    def setVerticalScrollBarPolicy(self, *args, **kwargs):
+        pass
+
+    def _setButtonsEnabled(self, enabled: bool):
+        for btn in [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_step4, self.btn_start_full]:
+            btn.setEnabled(bool(enabled))
+
+    def _on_canvas_transform_changed(self, *args, **kwargs):
+        pass
+
+    def _on_fill_requested(self, *args, **kwargs):
+        pass

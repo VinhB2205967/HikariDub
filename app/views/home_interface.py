@@ -9,25 +9,8 @@ import sys
 import importlib.util
 from qfluentwidgets import InfoBar, InfoBarPosition
 
-# Find base home_interface.pyc
-_pyc_path = None
-for cand in [
-    os.path.join(os.path.dirname(__file__), "home_interface.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyc_dump", "app", "views", "home_interface.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyc_dump", "app", "views", "home_interface.pyc"),
-    r"D:\HikariDub\pyc_dump\app\views\home_interface.pyc",
-    r"D:\Hikari_Dub\pyc_dump\app\views\home_interface.pyc"
-]:
-    if os.path.exists(cand):
-        _pyc_path = cand
-        break
-
-if not _pyc_path:
-    raise FileNotFoundError("Could not find base home_interface.pyc")
-
-_spec = importlib.util.spec_from_file_location("app.views.home_interface_base", _pyc_path)
-_base_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_base_mod)
+# Load pure-Python base HomeInterface (no .pyc dependency)
+import app.views.home_interface_base as _base_mod
 
 HomeInterface = _base_mod.HomeInterface
 
@@ -48,10 +31,8 @@ def _init_patched(self, parent=None):
         self.col1_scroll = QScrollArea()
         self.col1_scroll.setObjectName("hikariCol1Scroll")
         self.col1_scroll.setWidgetResizable(True)
-        # Keep the pane stationary at about 430 display pixels, accounting for Windows DPI scaling.
-        screen = QApplication.primaryScreen()
-        dpi_scale = screen.devicePixelRatio() if screen is not None else 1.0
-        settings_width = round(430 / max(dpi_scale, 1.0))
+        # Fixed, stable sidebar width designed so all buttons and labels fit perfectly without clipping or horizontal scroll
+        settings_width = 430
         self.col1_scroll.setFixedWidth(settings_width)
         self.col1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.col1_scroll.setStyleSheet("""
@@ -69,23 +50,109 @@ def _init_patched(self, parent=None):
         self.hBoxLayout.removeWidget(self.col3_widget)
 
         # Pin run_group at the bottom of Column 1 outside col1_scroll so CTA buttons are always visible
-        from PyQt6.QtWidgets import QVBoxLayout
+        from PyQt6.QtWidgets import QVBoxLayout, QSizePolicy
         self.col1_container = QWidget()
         self.col1_container.setObjectName("hikariCol1Container")
         self.col1_container.setFixedWidth(settings_width)
         self.col1_container.setStyleSheet("#hikariCol1Container { background: transparent; border: none; }")
         col1_vbox = QVBoxLayout(self.col1_container)
         col1_vbox.setContentsMargins(0, 0, 0, 0)
-        col1_vbox.setSpacing(8)
+        col1_vbox.setSpacing(6)
 
         self.col1_scroll.setWidget(self.col1_widget)
         col1_vbox.addWidget(self.col1_scroll, 1)
 
         if hasattr(self, 'run_group'):
             self.col1_layout.removeWidget(self.run_group)
+            rg_lay = self.run_group.layout()
+            if rg_lay:
+                rg_lay.setContentsMargins(12, 10, 12, 10)
+                rg_lay.setSpacing(6)
             col1_vbox.addWidget(self.run_group, 0)
 
-        # Integrate Resizable Horizontal QSplitter for 3-column workspace
+            # Style start button to ensure prominent gradient CTA that never clips
+            btn_start = rg_lay.itemAt(0).widget() if rg_lay else None
+            if btn_start:
+                btn_start.setFixedHeight(38)
+                btn_start.setStyleSheet("""
+                    QPushButton, PrimaryPushButton {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366F1, stop:0.5 #8B5CF6, stop:1 #EC4899);
+                        color: #FFFFFF;
+                        font-weight: 800;
+                        font-size: 12px;
+                        letter-spacing: 0.4px;
+                        border: 1px solid #C084FC;
+                        border-radius: 8px;
+                        padding: 6px 12px;
+                        text-align: center;
+                    }
+                    QPushButton:hover, PrimaryPushButton:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #818CF8, stop:0.5 #A78BFA, stop:1 #F472B6);
+                        border: 1px solid #F9A8D4;
+                        color: #FFFFFF;
+                    }
+                    QPushButton:pressed, PrimaryPushButton:pressed {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4F46E5, stop:0.5 #7C3AED, stop:1 #DB2777);
+                    }
+                    QPushButton:disabled, PrimaryPushButton:disabled {
+                        background: #141B2D;
+                        color: #475569;
+                        border: 1px solid #1E2942;
+                    }
+                """)
+
+            # Style the 4 manual step buttons in the 2x2 grid for generous width and zero clipping
+            grid_item = rg_lay.itemAt(2) if rg_lay else None
+            if grid_item and grid_item.layout():
+                gl = grid_item.layout()
+                gl.setHorizontalSpacing(8)
+                gl.setVerticalSpacing(6)
+                for bi in range(gl.count()):
+                    w = gl.itemAt(bi).widget()
+                    if w:
+                        w.setFixedHeight(32)
+                        w.setStyleSheet("""
+                            QPushButton, PushButton {
+                                background: #141C2E;
+                                border: 1px solid #25334D;
+                                border-radius: 6px;
+                                color: #E2E8F0;
+                                font-weight: 700;
+                                font-size: 11.5px;
+                                padding: 4px 8px;
+                            }
+                            QPushButton:hover, PushButton:hover {
+                                background: #1E2942;
+                                border-color: #22D3EE;
+                                color: #FFFFFF;
+                            }
+                            QPushButton:pressed, PushButton:pressed {
+                                background: #0F172A;
+                            }
+                        """)
+
+            # Style cancel button
+            btn_cancel = rg_lay.itemAt(4).widget() if rg_lay and rg_lay.count() > 4 else None
+            if btn_cancel:
+                btn_cancel.setFixedHeight(28)
+                btn_cancel.setStyleSheet("""
+                    QPushButton, PushButton {
+                        background: rgba(239, 68, 68, 0.12);
+                        border: 1px solid rgba(239, 68, 68, 0.35);
+                        border-radius: 6px;
+                        color: #F87171;
+                        font-weight: 700;
+                        font-size: 11px;
+                        padding: 4px 8px;
+                    }
+                    QPushButton:hover, PushButton:hover {
+                        background: rgba(239, 68, 68, 0.22);
+                        border-color: #EF4444;
+                        color: #FEF2F2;
+                    }
+                """)
+
+        # Integrate Resizable Horizontal QSplitter for 3-column workspace with prioritized center
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("hikariSplitter")
         splitter.setStyleSheet("""
@@ -103,32 +170,91 @@ def _init_patched(self, parent=None):
         splitter.addWidget(self.col1_container)
         splitter.addWidget(self.col2_widget)
         splitter.addWidget(self.col3_widget)
-        splitter.setSizes([settings_width, 680, 350])
+        splitter.setSizes([settings_width, 740, 280])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
         splitter.setChildrenCollapsible(False)
         self.hBoxLayout.addWidget(splitter)
+        self.workspace_splitter = splitter
 
-        # Optimize compact log display & viewport heights so everything fits without page-level vertical scrolling
+        # Optimize log display & viewport heights: clearly visible (150px) with smooth vertical scroll
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         if hasattr(self, 'vBoxLayout'):
-            self.vBoxLayout.setContentsMargins(12, 6, 12, 6)
+            self.vBoxLayout.setContentsMargins(10, 4, 10, 4)
             self.vBoxLayout.setSpacing(6)
         if hasattr(self, 'log_text_edit'):
-            self.log_text_edit.setFixedHeight(58)
+            self.log_text_edit.setFixedHeight(105)
+            self.log_text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.log_text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            if hasattr(self.log_text_edit, 'scrollDelegate'):
+                self.log_text_edit.scrollDelegate.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.log_text_edit.setStyleSheet("""
+                QTextEdit, QPlainTextEdit, TextEdit {
+                    background-color: #080D1A;
+                    border: 1px solid #1E293B;
+                    border-radius: 6px;
+                    color: #94A3B8;
+                    font-family: 'Consolas', 'Segoe UI', monospace;
+                    font-size: 11.5px;
+                    line-height: 1.45;
+                    padding: 6px 8px;
+                }
+                QTextEdit:focus, QPlainTextEdit:focus, TextEdit:focus {
+                    border: 1px solid #6366F1;
+                }
+                QScrollBar:vertical {
+                    background: #080D1A;
+                    width: 10px;
+                    margin: 2px 2px 2px 0px;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #334155;
+                    min-height: 24px;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #22D3EE;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                    background: none;
+                }
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                    background: none;
+                }
+            """)
         if hasattr(self, 'row2_widget'):
-            self.row2_widget.setFixedHeight(94)
+            self.row2_widget.setFixedHeight(150)
+            if self.row2_widget.layout():
+                r2_lay = self.row2_widget.layout()
+                r2_lay.setContentsMargins(12, 6, 12, 6)
+                r2_lay.setSpacing(5)
 
-        # Optimize Video Workspace & Canvas
+        # Optimize Video Workspace & Canvas for MAXIMUM viewing area
         if hasattr(self, 'video_frame'):
-            self.video_frame.setMinimumHeight(220)
+            self.video_frame.setMinimumHeight(380)
+            self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.video_frame.setStyleSheet("""
                 background: transparent;
                 border: none;
             """)
             if self.video_frame.layout():
                 self.video_frame.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Optimize col2 vertical stretch so video_frame expands to fill available height
+        if hasattr(self, 'col2_widget') and self.col2_widget.layout():
+            c2_lay = self.col2_widget.layout()
+            c2_lay.setSpacing(4)
+            c2_lay.setContentsMargins(10, 6, 10, 6)
+            for i in range(c2_lay.count()):
+                it = c2_lay.itemAt(i)
+                if it and it.widget() is getattr(self, 'video_frame', None):
+                    c2_lay.setStretch(i, 50)
+                else:
+                    c2_lay.setStretch(i, 0)
+
         if hasattr(self, 'video_canvas'):
             self.video_canvas.setStyleSheet("""
                 background-color: #000000;
@@ -505,21 +631,42 @@ def _init_patched(self, parent=None):
             if hasattr(self, val_lbl):
                 getattr(self, val_lbl).setStyleSheet(badge_val_qss)
 
-        # Log TextEdit styling — Deep Dark Navy Console aesthetic
+        # Log TextEdit styling — Deep Dark Navy Console aesthetic with visible smooth scrollbar
         if hasattr(self, 'log_text_edit'):
             self.log_text_edit.setStyleSheet(f"""
-                TextEdit {{
+                TextEdit, QTextEdit, QPlainTextEdit {{
                     background-color: {Colors.BG_DEEP};
                     color: {Colors.TEXT_SECONDARY};
                     border: 1px solid {Colors.BORDER};
                     border-radius: 8px;
-                    padding: 8px 12px;
-                    font-family: 'Consolas', 'Fira Code', monospace;
-                    font-size: 11px;
+                    padding: 6px 10px;
+                    font-family: 'Consolas', 'Fira Code', 'Segoe UI Mono', monospace;
+                    font-size: 11.5px;
                     line-height: 1.45;
                 }}
-                TextEdit:focus {{
+                TextEdit:focus, QTextEdit:focus {{
                     border: 1px solid {Colors.PRIMARY};
+                }}
+                QScrollBar:vertical {{
+                    background: {Colors.BG_DEEP};
+                    width: 10px;
+                    margin: 2px 2px 2px 0px;
+                    border-radius: 5px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background: #334155;
+                    min-height: 24px;
+                    border-radius: 5px;
+                }}
+                QScrollBar::handle:vertical:hover {{
+                    background: #22D3EE;
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                    background: none;
+                }}
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                    background: none;
                 }}
             """)
     except Exception as e:
@@ -881,11 +1028,11 @@ def _setup_video_canvas_transform(self):
 
     def recalc_and_apply_canvas_size():
         t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
-        pad = 8
+        pad = 4
         avail_w = max(100, vf.width() - pad * 2)
         avail_h = max(100, vf.height() - pad * 2)
-        if avail_h < 220:
-            avail_h = 260
+        if avail_h < 300:
+            avail_h = 320
 
         cw_nom = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
         ch_nom = float(t.canvas_h) if t.canvas_h > 0 else 1080.0
@@ -902,6 +1049,8 @@ def _setup_video_canvas_transform(self):
         h_int = max(50, int(round(ch_disp)))
         vc.setFixedSize(w_int, h_int)
         vc.update()
+        if hasattr(_self, '_popout_dialog') and _self._popout_dialog and _self._popout_dialog.isVisible():
+            _self._popout_dialog.canvas_view.update()
 
     self.recalc_and_apply_canvas_size = recalc_and_apply_canvas_size
 
@@ -1132,15 +1281,74 @@ def _setup_video_canvas_transform(self):
             _self._canvas_controls.update_zoom_from_scroll(delta)
         event.accept()
 
+    def patched_mouseDoubleClick(event):
+        _self._toggle_theater_mode()
+        event.accept()
+
     vc.mousePressEvent = patched_mousePress
     vc.mouseMoveEvent = patched_mouseMove
     vc.mouseReleaseEvent = patched_mouseRelease
+    vc.mouseDoubleClickEvent = patched_mouseDoubleClick
     vc.wheelEvent = patched_wheel
+    vc.setToolTip("Bấm đúp để Bật/Tắt chế độ xem rộng (Theater Mode) | Kéo để di chuyển | Lăn chuột để Zoom")
+
+    # Connect Theater & Popout signals from controls
+    if hasattr(_self, '_canvas_controls'):
+        try:
+            _self._canvas_controls.theater_toggled.connect(_self._toggle_theater_mode)
+            _self._canvas_controls.popout_requested.connect(_self._open_popout_preview)
+        except Exception:
+            pass
 
     # Initial sizing
     recalc_and_apply_canvas_size()
 
 HomeInterface._setup_video_canvas_transform = _setup_video_canvas_transform
+
+
+def _toggle_theater_mode(self):
+    """Expands center video canvas to full window width and height by collapsing side panels."""
+    theater = not getattr(self, '_theater_active', False)
+    self._theater_active = theater
+
+    if hasattr(self, 'col1_container'):
+        self.col1_container.setVisible(not theater)
+    if hasattr(self, 'col3_widget'):
+        self.col3_widget.setVisible(not theater)
+    if hasattr(self, 'row2_widget'):
+        self.row2_widget.setVisible(not theater)
+
+    if hasattr(self, '_canvas_controls'):
+        self._canvas_controls.set_theater_active(theater)
+
+    from PyQt6.QtCore import QTimer
+    QTimer.singleShot(30, self.recalc_and_apply_canvas_size)
+
+    if theater:
+        InfoBar.info(
+            title="Chế Độ Xem Rộng (Theater Mode)",
+            content="Đã phóng to tối đa khung xem trước! Bấm đúp vào video hoặc bấm lại nút để quay về giao diện 3 cột.",
+            parent=self.window(),
+            position=InfoBarPosition.TOP,
+            duration=3500
+        )
+
+
+def _open_popout_preview(self):
+    """Opens a separate floating HD window for multi-monitor or massive preview."""
+    try:
+        from app.views.canvas_popout_dialog import CanvasPopoutDialog
+        if not hasattr(self, '_popout_dialog') or not self._popout_dialog:
+            self._popout_dialog = CanvasPopoutDialog(self)
+        self._popout_dialog.show()
+        self._popout_dialog.raise_()
+        self._popout_dialog.activateWindow()
+    except Exception as e:
+        print(f"[HikariDub] Popout preview error: {e}")
+
+
+HomeInterface._toggle_theater_mode = _toggle_theater_mode
+HomeInterface._open_popout_preview = _open_popout_preview
 
 
 # ─── Transform signal handlers ────────────────────────────────────────────────

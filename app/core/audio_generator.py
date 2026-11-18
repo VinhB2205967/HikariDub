@@ -14,33 +14,149 @@ import subprocess
 import importlib.util
 import unicodedata
 
-# Load base audio_generator.pyc
-_pyc_path = None
-for cand in [
-    r"D:\HikariDub\pyc_dump\app\core\audio_generator.pyc",
-    r"D:\Hikari_Dub\_internal\app\core\audio_generator.pyc",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyc_dump", "app", "core", "audio_generator.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyc_dump", "app", "core", "audio_generator.pyc"),
-    os.path.join(os.path.dirname(__file__), "audio_generator.pyc"),
-    r"D:\Hikari_Dub\pyc_dump\app\core\audio_generator.pyc",
-]:
-    if os.path.exists(cand):
-        _pyc_path = cand
-        break
+# Pure-Python base implementation (no .pyc dependency)
+_base_mod = sys.modules[__name__]
 
-if not _pyc_path:
-    raise FileNotFoundError("Could not find base audio_generator.pyc")
 
-_spec = importlib.util.spec_from_file_location("app.core.audio_generator", _pyc_path)
-_base_mod = importlib.util.module_from_spec(_spec)
-sys.modules["app.core.audio_generator"] = _base_mod
-_spec.loader.exec_module(_base_mod)
-# Ensure _base_mod.__file__ points to app/core/audio_generator.py so relative model paths resolve to D:\HikariDub\models\piper
-_base_mod.__file__ = os.path.abspath(__file__)
+def get_audio_duration(file_path: str) -> float:
+    """Return duration of a WAV/audio file in seconds."""
+    if not file_path or not os.path.exists(file_path):
+        return 0.0
+    if file_path.lower().endswith(".wav"):
+        try:
+            import wave
+            with wave.open(file_path, "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return frames / float(rate)
+        except Exception:
+            pass
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        out = subprocess.run(
+            [ffmpeg_exe, "-i", file_path],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        ).stderr
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out or "")
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    except Exception:
+        pass
+    return 0.0
 
-for _attr in dir(_base_mod):
-    if not _attr.startswith("__"):
-        globals()[_attr] = getattr(_base_mod, _attr)
+
+def fetch_piper_voice(idx, text: str, temp_files: list, cancel_event, workspace_dir: str, voice):
+    """Synthesize a single subtitle line using a loaded PiperVoice instance."""
+    import wave
+    if cancel_event and cancel_event.is_set():
+        return None
+    os.makedirs(workspace_dir, exist_ok=True)
+    out_wav = os.path.join(workspace_dir, f"temp_sub_{idx}_raw.wav")
+    cleaned = _clean_tts_text(text) or "..."
+    with wave.open(out_wav, "wb") as wf:
+        voice.synthesize_wav(cleaned, wf)
+    if temp_files is not None:
+        temp_files.append(out_wav)
+    return out_wav
+
+
+def _base_generate_audio_logic(
+    srt_path: str,
+    api_key=None,
+    voice_model: str = "banmai",
+    status_cb=None,
+    cancel_event=None,
+    temp_files=None,
+    workspace_dir: str = ".",
+    target_lang: str = "Tiếng Việt",
+    max_speed: float = 1.35,
+):
+    """Pure-Python Piper TTS + FFmpeg timeline assembly."""
+    import pysrt
+    import imageio_ffmpeg
+    from piper import PiperVoice
+
+    if temp_files is None:
+        temp_files = []
+    os.makedirs(workspace_dir, exist_ok=True)
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+    # Locate Piper ONNX model
+    proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    voice_name = str(voice_model or "banmai").strip()
+    if not voice_name.endswith(".onnx"):
+        voice_name_onnx = f"{voice_name}.onnx"
+    else:
+        voice_name_onnx = voice_name
+
+    model_path = None
+    for cand in [
+        voice_name if os.path.exists(voice_name) else "",
+        os.path.join(proj_root, "models", "piper", "Tiếng Việt", voice_name_onnx),
+        os.path.join(proj_root, "models", "piper", voice_name_onnx),
+        os.path.join(proj_root, "_internal", "models", "piper", "Tiếng Việt", voice_name_onnx),
+    ]:
+        if cand and os.path.exists(cand):
+            model_path = cand
+            break
+
+    if not model_path:
+        raise FileNotFoundError(f"Không tìm thấy model Piper TTS: {voice_name_onnx}")
+
+    cfg_path = model_path + ".json"
+    voice = PiperVoice.load(model_path, cfg_path if os.path.exists(cfg_path) else None)
+    subs = pysrt.open(srt_path, encoding="utf-8")
+    total = max(1, len(subs))
+
+    inputs = []
+    filter_parts = []
+    mix_labels = []
+
+    for i, sub in enumerate(subs):
+        if cancel_event and cancel_event.is_set():
+            return None
+        if status_cb:
+            status_cb(f"Đang tạo giọng đọc {i + 1}/{total}...")
+
+        raw_wav = fetch_piper_voice(i, sub.text, temp_files, cancel_event, workspace_dir, voice)
+        if not raw_wav or not os.path.exists(raw_wav):
+            continue
+
+        start_ms = sub.start.ordinal
+        end_ms = sub.end.ordinal
+        slot_sec = max(0.3, (end_ms - start_ms) / 1000.0)
+        raw_dur = get_audio_duration(raw_wav)
+        speed = 1.0
+        if raw_dur > slot_sec and slot_sec > 0:
+            speed = min(float(max_speed or 1.6), max(1.0, (raw_dur / slot_sec) * 1.02))
+
+        fitted_wav = os.path.join(workspace_dir, f"temp_sub_{i}_fit.wav")
+        atempo_str = _build_atempo_filter_str(speed)
+        subprocess.run(
+            [ffmpeg_exe, "-y", "-i", raw_wav, "-filter:a", atempo_str, "-ar", "44100", "-ac", "1", fitted_wav],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
+        use_wav = fitted_wav if os.path.exists(fitted_wav) else raw_wav
+        if use_wav not in temp_files:
+            temp_files.append(use_wav)
+
+        idx_in = len(inputs)
+        inputs.extend(["-i", use_wav])
+        lbl = f"[a{idx_in}]"
+        filter_parts.append(f"[{idx_in}:a]adelay={start_ms}|{start_ms}{lbl}")
+        mix_labels.append(lbl)
+
+    if not mix_labels:
+        return None
+
+    out_audio = os.path.join(workspace_dir, "dubbed_voice.wav")
+    fc = ";".join(filter_parts) + f";{''.join(mix_labels)}amix=inputs={len(mix_labels)}:normalize=0[aout]"
+    cmd = [ffmpeg_exe, "-y", *inputs, "-filter_complex", fc, "-map", "[aout]", "-ar", "44100", "-ac", "2", out_audio]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return out_audio if os.path.exists(out_audio) else None
+
 
 
 def _clean_tts_text(text: str) -> str:
@@ -288,7 +404,7 @@ def _parse_atempo_product(filter_str: str) -> float:
     return prod
 
 
-_orig_generate_audio_logic = getattr(_base_mod, "generate_audio_logic", None)
+_orig_generate_audio_logic = _base_generate_audio_logic
 
 def generate_audio_logic_patched(*args, **kwargs):
     """

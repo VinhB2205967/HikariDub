@@ -9,33 +9,68 @@ import importlib.util
 import subprocess
 import shlex
 
-# Find base video_renderer.pyc
-_pyc_path = None
-for cand in [
-    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyc_dump", "app", "core", "video_renderer.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyc_dump", "app", "core", "video_renderer.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_internal", "app", "core", "video_renderer.pyc"),
-    os.path.join(os.path.dirname(__file__), "video_renderer.pyc"),
-    r"D:\HikariDub\pyc_dump\app\core\video_renderer.pyc",
-    r"D:\Hikari_Dub\pyc_dump\app\core\video_renderer.pyc"
-]:
-    if os.path.exists(cand):
-        _pyc_path = cand
-        break
+# Pure-Python base implementation (no .pyc dependency)
+_base_mod = sys.modules[__name__]
 
-if not _pyc_path:
-    raise FileNotFoundError("Could not find base video_renderer.pyc")
 
-# PyArmor requires sys.modules['app.core.video_renderer'] to be populated
-_spec = importlib.util.spec_from_file_location("app.core.video_renderer", _pyc_path)
-_base_mod = importlib.util.module_from_spec(_spec)
-sys.modules["app.core.video_renderer"] = _base_mod
-_spec.loader.exec_module(_base_mod)
+def render_logic(
+    video_path: str,
+    srt_path: str = None,
+    audio_path: str = None,
+    workspace_dir: str = ".",
+    status_cb=None,
+    cancel_event=None,
+    license_status: str = "premium",
+    video_config: dict = None,
+):
+    """Render dubbed video with FFmpeg (subtitles, audio mix, canvas transform)."""
+    import imageio_ffmpeg
 
-# Export all symbols from base module
-for attr in dir(_base_mod):
-    if not attr.startswith('__'):
-        globals()[attr] = getattr(_base_mod, attr)
+    if not video_path or not os.path.exists(video_path):
+        raise FileNotFoundError(f"Không tìm thấy file video: {video_path}")
+
+    os.makedirs(workspace_dir, exist_ok=True)
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    base_name = os.path.splitext(os.path.basename(video_path))[0]
+    out_path = os.path.join(workspace_dir, f"HikariDub_{base_name}.mp4")
+
+    if status_cb:
+        status_cb("Đang bắt đầu xuất video...")
+
+    cmd = [ffmpeg_exe, "-y", "-i", video_path]
+    has_audio = bool(audio_path and os.path.exists(audio_path))
+    if has_audio:
+        cmd.extend(["-i", audio_path])
+
+    vf_parts = []
+    if srt_path and os.path.exists(srt_path):
+        esc_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+        vf_parts.append(f"subtitles='{esc_srt}'")
+
+    if vf_parts:
+        cmd.extend(["-vf", ",".join(vf_parts)])
+
+    if has_audio:
+        cmd.extend(["-map", "0:v:0", "-map", "1:a:0", "-shortest"])
+
+    cmd.extend(["-c:v", "libx264", "-crf", "18", "-c:a", "aac", "-b:a", "192k", out_path])
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    while proc.poll() is None:
+        if cancel_event and cancel_event.is_set():
+            proc.terminate()
+            return None
+        import time
+        time.sleep(0.2)
+
+    if proc.returncode != 0:
+        err = proc.stderr.read().decode("utf-8", errors="ignore")[-500:]
+        raise RuntimeError(f"FFmpeg lỗi ({proc.returncode}): {err}")
+
+    if status_cb:
+        status_cb("Xuất video hoàn tất!")
+    return out_path
+
 
 import re as _re
 

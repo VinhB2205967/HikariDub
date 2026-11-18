@@ -1,97 +1,29 @@
 """
-Library Interface Module - Hikari Dub v3.0 AI Dubbing Studio
-Wraps and patches LibraryInterface and VideoCard with the Modern SaaS
-gradient & glassmorphic design system.
+Library Interface Module - Pure Python Edition (Hikari Dub v3.0 AI Dubbing Studio).
+Displays completed video projects with Modern SaaS cards.
 """
 
 import os
-import sys
-import importlib.util
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame
+)
 from PyQt6.QtCore import Qt
-from qfluentwidgets import PrimaryPushButton, PushButton, TransparentToolButton, FluentIcon as FIF
+from qfluentwidgets import PrimaryPushButton, PushButton, FluentIcon as FIF
 
 from app.common.design_system import Colors, Gradients
+from app.common.config_manager import get_config
 from app.components.modern_effects import attach_hover_glow, ModernEmptyState
 
-# Find base library_interface.pyc
-_pyc_path = None
-for cand in [
-    os.path.join(os.path.dirname(__file__), "library_interface.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyc_dump", "app", "views", "library_interface.pyc"),
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyc_dump", "app", "views", "library_interface.pyc"),
-    r"D:\HikariDub\pyc_dump\app\views\library_interface.pyc",
-    r"D:\Hikari_Dub\pyc_dump\app\views\library_interface.pyc"
-]:
-    if os.path.exists(cand):
-        _pyc_path = cand
-        break
 
-if not _pyc_path:
-    raise FileNotFoundError("Could not find base library_interface.pyc")
+class VideoCard(QFrame):
+    """Card displaying a completed video project."""
 
-_spec = importlib.util.spec_from_file_location("app.views.library_interface_base", _pyc_path)
-_base_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_base_mod)
+    def __init__(self, video_path: str, workspace_path: str = "", status: str = "completed", parent=None):
+        super().__init__(parent)
+        self.video_path = video_path
+        self.workspace_path = workspace_path
+        self.status = status
 
-for attr in dir(_base_mod):
-    if not attr.startswith('__'):
-        globals()[attr] = getattr(_base_mod, attr)
-
-LibraryInterface = _base_mod.LibraryInterface
-VideoCard = _base_mod.VideoCard
-
-# 1. Patch LibraryInterface.__init__ to apply Modern SaaS layout & styling
-_orig_lib_init = LibraryInterface.__init__
-def _lib_init_patched(self, parent=None):
-    _orig_lib_init(self, parent)
-    try:
-        self.col1_widget.setObjectName("hikariLibCard")
-        self.col1_widget.setStyleSheet("")
-        attach_hover_glow(self.col1_widget)
-
-        self.btn_refresh.setText("Làm Mới Danh Sách")
-        self.btn_refresh.setMinimumWidth(175)
-        self.btn_open_all.setText("Mở Thư Mục Xuất")
-        self.btn_open_all.setMinimumWidth(175)
-
-        self.btn_open_all.setStyleSheet(f"""
-            PrimaryPushButton, PushButton {{
-                background: {Gradients.BLUE_PURPLE};
-                color: #FFFFFF;
-                font-weight: 700;
-                border: 1px solid #818CF8;
-                border-radius: 8px;
-                padding: 6px 16px 6px 36px;
-            }}
-            PrimaryPushButton:hover, PushButton:hover {{
-                background: {Gradients.BLUE_PURPLE_HOVER};
-                border: 1px solid #C4B5FD;
-                color: #FFFFFF;
-            }}
-        """)
-
-        if hasattr(self, 'col1_layout') and self.col1_layout.count() > 0:
-            hl = self.col1_layout.itemAt(0).layout()
-            if hl and hl.count() > 0 and hl.itemAt(0).widget():
-                lbl = hl.itemAt(0).widget()
-                lbl.setText("🎬 DỰ ÁN & VIDEO ĐÃ HOÀN TẤT")
-                lbl.setStyleSheet(f"""
-                    color: {Colors.TEXT_PRIMARY};
-                    font-weight: 800;
-                    font-size: 15px;
-                    letter-spacing: 0.6px;
-                """)
-    except Exception as e:
-        print(f"Lỗi khởi tạo giao diện Library: {e}")
-
-LibraryInterface.__init__ = _lib_init_patched
-
-# 2. Patch VideoCard.__init__ to render modern SaaS studio cards with gradient actions
-_orig_card_init = VideoCard.__init__
-def _card_init_patched(self, video_path, workspace_path, status, parent=None):
-    _orig_card_init(self, video_path, workspace_path, status, parent)
-    try:
         attach_hover_glow(self)
         self.setStyleSheet(f"""
             VideoCard {{
@@ -104,59 +36,140 @@ def _card_init_patched(self, video_path, workspace_path, status, parent=None):
                 border: 1px solid {Colors.PRIMARY};
             }}
         """)
-        if hasattr(self, 'lbl_name'):
-            self.lbl_name.setStyleSheet(f"font-weight: 700; font-size: 13px; color: {Colors.TEXT_PRIMARY};")
 
-        if hasattr(self, 'btn_play') and self.status == 'completed':
-            self.btn_play.setText("Phát Video")
-            self.btn_play.setStyleSheet(f"""
-                PrimaryPushButton, QPushButton {{
-                    background: {Gradients.BLUE_PURPLE};
-                    color: #FFFFFF;
-                    font-weight: 700;
-                    border-radius: 7px;
-                    border: 1px solid #818CF8;
-                    padding: 5px 12px 6px 34px;
-                }}
-                PrimaryPushButton:hover, QPushButton:hover {{
-                    background: {Gradients.INDIGO_VIOLET_PINK_HOVER};
-                    border: 1px solid #F472B6;
-                }}
-            """)
-        elif hasattr(self, 'btn_play') and self.status == 'processing':
-            self.btn_play.setText("Xóa Dữ Liệu Tạm")
-            self.btn_play.setStyleSheet(f"""
-                QPushButton, PushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(239, 68, 68, 0.25), stop:1 rgba(236, 72, 153, 0.25));
-                    color: #FDA4AF;
-                    font-weight: 700;
-                    border-radius: 7px;
-                    border: 1px solid rgba(244, 63, 94, 0.6);
-                    padding: 5px 12px 6px 34px;
-                }}
-                QPushButton:hover, PushButton:hover {{
-                    background: {Gradients.DANGER_GRAD};
-                    color: #FFFFFF;
-                }}
-            """)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(12)
 
-        if hasattr(self, 'btn_title'):
-            self.btn_title.setStyleSheet(f"""
-                QPushButton, PushButton {{
-                    background: #151B2E;
-                    color: {Colors.ACCENT_BRIGHT};
-                    font-weight: 600;
-                    border-radius: 7px;
-                    border: 1px solid {Colors.BORDER};
-                    font-size: 12px;
-                }}
-                QPushButton:hover, PushButton:hover {{
-                    background: {Gradients.CYAN_BLUE};
-                    color: #FFFFFF;
-                    border: 1px solid #38BDF8;
-                }}
-            """)
-    except Exception as e:
-        print(f"Lỗi khởi tạo VideoCard: {e}")
+        info_col = QVBoxLayout()
+        self.lbl_name = QLabel(os.path.basename(video_path), self)
+        self.lbl_name.setStyleSheet(f"font-weight: 700; font-size: 13px; color: {Colors.TEXT_PRIMARY}; background: transparent; border: none;")
+        info_col.addWidget(self.lbl_name)
 
-VideoCard.__init__ = _card_init_patched
+        size_mb = 0.0
+        try:
+            size_mb = os.path.getsize(video_path) / (1024 * 1024)
+        except Exception:
+            pass
+        self.lbl_meta = QLabel(f"{size_mb:.1f} MB • {os.path.dirname(video_path)}", self)
+        self.lbl_meta.setStyleSheet(f"font-size: 11px; color: {Colors.TEXT_SECONDARY}; background: transparent; border: none;")
+        info_col.addWidget(self.lbl_meta)
+        lay.addLayout(info_col, 1)
+
+        self.btn_play = PrimaryPushButton(FIF.PLAY, "Phát Video", self)
+        self.btn_play.setStyleSheet(f"""
+            PrimaryPushButton, QPushButton {{
+                background: {Gradients.BLUE_PURPLE};
+                color: #FFFFFF;
+                font-weight: 700;
+                border-radius: 7px;
+                border: 1px solid #818CF8;
+                padding: 5px 14px;
+            }}
+        """)
+        self.btn_play.clicked.connect(lambda: os.startfile(self.video_path) if os.path.exists(self.video_path) else None)
+        lay.addWidget(self.btn_play)
+
+        self.btn_folder = PushButton(FIF.FOLDER, "Mở Thư Mục", self)
+        self.btn_folder.clicked.connect(lambda: os.startfile(os.path.dirname(self.video_path)) if os.path.exists(os.path.dirname(self.video_path)) else None)
+        lay.addWidget(self.btn_folder)
+
+
+class LibraryInterface(QWidget):
+    """Project library interface showing rendered output videos."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("libraryInterface")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        self.col1_widget = QWidget(self)
+        self.col1_widget.setObjectName("hikariLibCard")
+        attach_hover_glow(self.col1_widget)
+        self.col1_layout = QVBoxLayout(self.col1_widget)
+        self.col1_layout.setContentsMargins(16, 16, 16, 16)
+        self.col1_layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        lbl_title = QLabel("🎬 DỰ ÁN & VIDEO ĐÃ HOÀN TẤT", self.col1_widget)
+        lbl_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: 800; font-size: 15px; letter-spacing: 0.6px;")
+        header.addWidget(lbl_title)
+        header.addStretch(1)
+
+        self.btn_refresh = PushButton(FIF.SYNC, "Làm Mới Danh Sách", self.col1_widget)
+        self.btn_refresh.setMinimumWidth(175)
+        self.btn_refresh.clicked.connect(self.refresh_list)
+        header.addWidget(self.btn_refresh)
+
+        self.btn_open_all = PrimaryPushButton(FIF.FOLDER, "Mở Thư Mục Xuất", self.col1_widget)
+        self.btn_open_all.setMinimumWidth(175)
+        self.btn_open_all.setStyleSheet(f"""
+            PrimaryPushButton, PushButton {{
+                background: {Gradients.BLUE_PURPLE};
+                color: #FFFFFF;
+                font-weight: 700;
+                border: 1px solid #818CF8;
+                border-radius: 8px;
+                padding: 6px 16px;
+            }}
+            PrimaryPushButton:hover, PushButton:hover {{
+                background: {Gradients.BLUE_PURPLE_HOVER};
+                border: 1px solid #C4B5FD;
+                color: #FFFFFF;
+            }}
+        """)
+        self.btn_open_all.clicked.connect(self._open_output_dir)
+        header.addWidget(self.btn_open_all)
+        self.col1_layout.addLayout(header)
+
+        self.scroll = QScrollArea(self.col1_widget)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.list_container = QWidget()
+        self.list_container.setStyleSheet("background: transparent;")
+        self.list_layout = QVBoxLayout(self.list_container)
+        self.list_layout.setContentsMargins(0, 0, 0, 0)
+        self.list_layout.setSpacing(10)
+        self.scroll.setWidget(self.list_container)
+        self.col1_layout.addWidget(self.scroll, 1)
+
+        root.addWidget(self.col1_widget, 1)
+        self.refresh_list()
+
+    def _get_output_dir(self) -> str:
+        return get_config("output_dir", os.path.join(os.getcwd(), "Output"))
+
+    def _open_output_dir(self):
+        out_dir = self._get_output_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        os.startfile(out_dir)
+
+    def refresh_list(self):
+        while self.list_layout.count():
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        out_dir = self._get_output_dir()
+        videos = []
+        if os.path.isdir(out_dir):
+            for fname in sorted(os.listdir(out_dir), reverse=True):
+                if fname.lower().endswith((".mp4", ".mkv", ".mov", ".avi")):
+                    videos.append(os.path.join(out_dir, fname))
+
+        if not videos:
+            empty = ModernEmptyState(
+                "🎬",
+                "Chưa có video đã xuất",
+                "Hãy chọn video ở Bảng Điều Khiển và nhấn Render Video để xem thành quả tại đây.",
+                parent=self.list_container
+            )
+            self.list_layout.addWidget(empty)
+        else:
+            for vp in videos:
+                self.list_layout.addWidget(VideoCard(vp, out_dir, "completed", self.list_container))
+
+        self.list_layout.addStretch(1)
