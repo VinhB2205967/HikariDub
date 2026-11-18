@@ -463,15 +463,20 @@ class HomeInterface(QWidget):
         if not video_path or not os.path.exists(video_path):
             return
         try:
-            import cv2
-            cap = cv2.VideoCapture(video_path)
-            ok, frame = cap.read()
-            cap.release()
-            if ok and frame is not None:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb.shape
-                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
-                self.video_canvas.setImage(qimg)
+            import subprocess
+            import tempfile
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            tmp_png = os.path.join(tempfile.gettempdir(), "hikari_preview_frame.png")
+            subprocess.run(
+                [ffmpeg_exe, "-y", "-ss", "0.5", "-i", video_path, "-vframes", "1", tmp_png],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            )
+            if os.path.exists(tmp_png):
+                qimg = QImage(tmp_png)
+                if not qimg.isNull():
+                    self.video_canvas.setImage(qimg)
+                    return
         except Exception as e:
             self._appendLog(f"Không xem trước được khung hình: {e}")
 

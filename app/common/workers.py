@@ -50,7 +50,7 @@ class TranslateWorker(QThread):
                 self._cancel_event,
                 self.workspace_dir,
                 prompt_style=self.prompt_style,
-                custom_prompt=self.custom_prompt,
+                custom_prompt_text=self.custom_prompt,
                 target_lang=self.target_lang,
             )
             self.progress.emit(100)
