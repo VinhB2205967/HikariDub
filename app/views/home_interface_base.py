@@ -62,8 +62,11 @@ class _TranscribeWorker(QThread):
                 end = pysrt.SubRipTime(seconds=seg.end)
                 subs.append(pysrt.SubRipItem(idx, start, end, seg.text.strip()))
 
-            base = os.path.splitext(os.path.basename(self.video_path))[0]
-            out_srt = os.path.join(self.workspace_dir, f"{base}_orig.srt")
+            from app.core.video_utils import get_safe_basename
+            base = get_safe_basename(self.video_path)
+            data_dir = os.path.join(self.workspace_dir, base, "Data")
+            os.makedirs(data_dir, exist_ok=True)
+            out_srt = os.path.join(data_dir, "temp_original.srt")
             subs.save(out_srt, encoding="utf-8")
             self.progress.emit(100)
             self.finished_srt.emit(out_srt)
@@ -194,6 +197,7 @@ class HomeInterface(QWidget):
         self.setObjectName("homeInterface")
         self.license_status = "premium"
         self._video_paths = []
+        self.selected_videos = []
         self._orig_srt_path = ""
         self._trans_srt_path = ""
         self._audio_path = ""
@@ -480,6 +484,7 @@ class HomeInterface(QWidget):
         files, _ = QFileDialog.getOpenFileNames(self, "Chọn Video", "", "Video Files (*.mp4 *.mkv *.mov *.avi)")
         if files:
             self._video_paths = files
+            self.selected_videos = files
             self.video_combo.clear()
             for f in files:
                 self.video_combo.addItem(os.path.basename(f), userData=f)
@@ -604,6 +609,7 @@ class HomeInterface(QWidget):
 
     def _onTranscribeError(self, err: str):
         self._auto_running = False
+        self._setButtonsEnabled(True)
         self._appendLog(f"[LỖI] {err}")
         InfoBar.error("Lỗi", str(err), parent=self, position=InfoBarPosition.TOP)
 
@@ -611,6 +617,7 @@ class HomeInterface(QWidget):
         pass  # Overridden by home_interface.py patch
 
     def _onTranslateFinished(self, srt_path: str):
+        self._setButtonsEnabled(True)
         self._trans_srt_path = srt_path
         self._load_srt_to_list(srt_path, self.srt_trans_list)
         self.srt_pivot.setCurrentItem("trans")
