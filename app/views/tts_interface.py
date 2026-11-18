@@ -24,16 +24,29 @@ class TTSInterface(QWidget):
         row.addWidget(QLabel("Giọng đọc:", self))
         self.combo_voice = ComboBox(self)
         for label, vid in [
-            ("Ban Mai (Nữ)", "banmai"),
-            ("Mạnh Dũng (Nam)", "manhdung"),
-            ("Chiêu Thanh (Nữ)", "chieuthanh"),
-            ("Lạc Phi (Nữ)", "lacphi"),
-            ("Ngọc Huyền (Nữ)", "ngochuyen"),
-            ("Vais1000 (Nữ tự nhiên)", "vais1000"),
+            ("Ban Mai (Nữ - Local)", "piper:banmai"),
+            ("Mạnh Dũng (Nam - Local)", "piper:manhdung"),
+            ("Chiêu Thanh (Nữ - Local)", "piper:chieuthanh"),
+            ("Lạc Phi (Nữ - Local)", "piper:lacphi"),
+            ("Ngọc Huyền (Nữ - Local)", "piper:ngochuyen"),
+            ("Vais1000 (Nữ tự nhiên - Local)", "piper:vais1000"),
+            ("TikTok VN - Nữ 01 (SessionID)", "tiktok:BV074_streaming"),
+            ("TikTok VN - Nam 01 (SessionID)", "tiktok:BV075_streaming"),
+            ("TikTok US - Jessie (SessionID)", "tiktok:en_us_002"),
+            ("TikTok US - Joey (SessionID)", "tiktok:en_us_006"),
+            ("TikTok US - Ghostface (SessionID)", "tiktok:en_us_ghostface"),
         ]:
             self.combo_voice.addItem(label, userData=vid)
         row.addWidget(self.combo_voice, 1)
         lay.addLayout(row)
+
+        from qfluentwidgets import LineEdit
+        from app.common.config_manager import get_config, set_config
+        self.line_session = LineEdit(self)
+        self.line_session.setPlaceholderText("TikTok Session ID (nếu chọn giọng TikTok)...")
+        self.line_session.setText(get_config("tiktok_session_id", "") or "")
+        self.line_session.textChanged.connect(lambda t: set_config("tiktok_session_id", t.strip()))
+        lay.addWidget(self.line_session)
 
         self.txt_input = PlainTextEdit(self)
         self.txt_input.setPlaceholderText("Nhập văn bản tiếng Việt để chuyển thành giọng nói...")
@@ -49,18 +62,25 @@ class TTSInterface(QWidget):
             InfoBar.warning("Thiếu nội dung", "Vui lòng nhập văn bản.", parent=self, position=InfoBarPosition.TOP)
             return
         try:
-            from piper import PiperVoice
             import app.core.audio_generator as ag
-            vid = self.combo_voice.currentData() or "banmai"
+            vid = self.combo_voice.currentData() or "piper:banmai"
             root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            mpath = os.path.join(root, "models", "piper", "Tiếng Việt", f"{vid}.onnx")
-            if not os.path.exists(mpath):
-                InfoBar.warning("Chưa có model", f"Chưa tìm thấy {mpath}. Hãy tải model trong Cài Đặt.", parent=self, position=InfoBarPosition.TOP)
-                return
-            voice = PiperVoice.load(mpath, mpath + ".json" if os.path.exists(mpath + ".json") else None)
             out_dir = os.path.join(root, "Data")
             temp_files = []
-            out_wav = ag.fetch_piper_voice("studio", text, temp_files, None, out_dir, voice)
+            if vid.startswith("tiktok:"):
+                sid = self.line_session.text().strip()
+                out_wav = ag.fetch_tiktok_voice("studio", text, temp_files, None, out_dir, vid, sid)
+            else:
+                from piper import PiperVoice
+                vname = vid.replace("piper:", "").strip()
+                if vname == "vais1000":
+                    vname = "vi_VN-vais1000-medium"
+                mpath = os.path.join(root, "models", "piper", "vi", f"{vname}.onnx")
+                if not os.path.exists(mpath):
+                    InfoBar.warning("Chưa có model", f"Chưa tìm thấy {mpath}.", parent=self, position=InfoBarPosition.TOP)
+                    return
+                voice = PiperVoice.load(mpath, mpath + ".json" if os.path.exists(mpath + ".json") else None)
+                out_wav = ag.fetch_piper_voice("studio", text, temp_files, None, out_dir, voice)
             if out_wav and os.path.exists(out_wav):
                 os.startfile(out_wav)
                 InfoBar.success("Hoàn tất", f"Đã tạo: {out_wav}", parent=self, position=InfoBarPosition.TOP)

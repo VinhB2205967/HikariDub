@@ -269,28 +269,56 @@ class HomeInterface(QWidget):
         )
         self.col1_layout.addWidget(self.combo_whisper)
 
-        lbl_voice = QLabel("Giọng đọc AI (Piper TTS Tiếng Việt):", self.col1_container)
+        lbl_voice = QLabel("Giọng đọc AI (Piper Local & TikTok SessionID):", self.col1_container)
         lbl_voice.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
         self.col1_layout.addWidget(lbl_voice)
         self.combo_voice = ComboBox(self.col1_container)
         for lbl_v, val_v in [
-            ("Ban Mai (Nữ)", "banmai"),
-            ("Mạnh Dũng (Nam)", "manhdung"),
-            ("Chiêu Thanh (Nữ)", "chieuthanh"),
-            ("Lạc Phi (Nữ)", "lacphi"),
-            ("Ngọc Huyền (Nữ)", "ngochuyen"),
-            ("Vais1000 (Nữ tự nhiên)", "vais1000"),
+            ("Ban Mai (Nữ - Local Offline)", "piper:banmai"),
+            ("Mạnh Dũng (Nam - Local Offline)", "piper:manhdung"),
+            ("Chiêu Thanh (Nữ - Local Offline)", "piper:chieuthanh"),
+            ("Lạc Phi (Nữ - Local Offline)", "piper:lacphi"),
+            ("Ngọc Huyền (Nữ - Local Offline)", "piper:ngochuyen"),
+            ("Vais1000 (Nữ tự nhiên - Local Offline)", "piper:vais1000"),
+            ("TikTok VN - Nhân Vật Nữ 01 (SessionID)", "tiktok:BV074_streaming"),
+            ("TikTok VN - Nhân Vật Nam 01 (SessionID)", "tiktok:BV075_streaming"),
+            ("TikTok US - Jessie Nữ (SessionID)", "tiktok:en_us_002"),
+            ("TikTok US - Joey Nam (SessionID)", "tiktok:en_us_006"),
+            ("TikTok US - Professor (SessionID)", "tiktok:en_us_007"),
+            ("TikTok US - Chris (SessionID)", "tiktok:en_us_009"),
+            ("TikTok UK - Narrator (SessionID)", "tiktok:en_uk_001"),
+            ("TikTok US - Ghostface (SessionID)", "tiktok:en_us_ghostface"),
+            ("TikTok US - C3PO (SessionID)", "tiktok:en_us_c3po"),
+            ("TikTok US - Stitch (SessionID)", "tiktok:en_us_stitch"),
+            ("TikTok US - Stormtrooper (SessionID)", "tiktok:en_us_stormtrooper"),
+            ("TikTok US - Rocket (SessionID)", "tiktok:en_us_rocket"),
+            ("TikTok CN - Nữ 01 (SessionID)", "tiktok:BV001_streaming"),
+            ("TikTok CN - Nam 01 (SessionID)", "tiktok:BV002_streaming"),
+            ("TikTok JP - Nữ 01 (SessionID)", "tiktok:jp_001"),
+            ("TikTok JP - Nam 01 (SessionID)", "tiktok:jp_006"),
+            ("TikTok KR - Nữ 01 (SessionID)", "tiktok:kr_002"),
+            ("TikTok KR - Nam 01 (SessionID)", "tiktok:kr_003"),
         ]:
             self.combo_voice.addItem(lbl_v, userData=val_v)
-        saved_v = get_config("tts_voice", "banmai")
+        saved_v = get_config("tts_voice", "piper:banmai")
+        if saved_v and ":" not in saved_v:
+            saved_v = f"piper:{saved_v}"
         for idx_v in range(self.combo_voice.count()):
             if self.combo_voice.itemData(idx_v) == saved_v:
                 self.combo_voice.setCurrentIndex(idx_v)
                 break
         self.combo_voice.currentIndexChanged.connect(
-            lambda i: set_config("tts_voice", self.combo_voice.itemData(i) or "banmai")
+            lambda i: set_config("tts_voice", self.combo_voice.itemData(i) or "piper:banmai")
         )
         self.col1_layout.addWidget(self.combo_voice)
+
+        self.line_tiktok_session = LineEdit(self.col1_container)
+        self.line_tiktok_session.setPlaceholderText("TikTok Session ID (chỉ cần nếu dùng giọng TikTok)...")
+        self.line_tiktok_session.setText(get_config("tiktok_session_id", "") or "")
+        self.line_tiktok_session.textChanged.connect(
+            lambda txt: set_config("tiktok_session_id", txt.strip())
+        )
+        self.col1_layout.addWidget(self.line_tiktok_session)
 
         # Translation settings
         lbl_lang = QLabel("Ngôn ngữ dịch & Phong cách:", self.col1_container)

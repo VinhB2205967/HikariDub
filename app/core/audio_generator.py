@@ -62,6 +62,55 @@ def fetch_piper_voice(idx, text: str, temp_files: list, cancel_event, workspace_
     return out_wav
 
 
+def fetch_tiktok_voice(idx, text: str, temp_files: list, cancel_event, workspace_dir: str, voice_id: str, session_id: str):
+    """Synthesize a single subtitle line using TikTok TTS API with sessionid."""
+    import base64
+    import requests
+
+    if cancel_event and cancel_event.is_set():
+        return None
+    if not session_id or not str(session_id).strip():
+        raise ValueError("Giọng TikTok yêu cầu nhập TikTok Session ID!")
+
+    os.makedirs(workspace_dir, exist_ok=True)
+    cleaned = _clean_tts_text(text) or "..."
+    vid = str(voice_id or "BV074_streaming").replace("tiktok:", "").strip()
+
+    endpoints = [
+        "https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/",
+        "https://api16-normal-v6.tiktokv.com/media/api/text/speech/invoke/",
+        "https://api22-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/",
+    ]
+    headers = {
+        "User-Agent": "com.zhiliaoapp.musically/2022600030 (Linux; U; Android 7.1.2; es_ES; SM-G988N; Build/NRD90M;tt-ok/3.12.13.1)",
+        "Cookie": f"sessionid={str(session_id).strip()}",
+    }
+
+    last_err = None
+    for url in endpoints:
+        try:
+            resp = requests.post(
+                url,
+                params={"text_speaker": vid, "req_text": cleaned, "speaker_map_type": 0, "aid": 1233},
+                headers=headers,
+                timeout=15,
+            )
+            data = resp.json()
+            v_str = (data.get("data") or {}).get("v_str")
+            if v_str:
+                out_mp3 = os.path.join(workspace_dir, f"temp_sub_{idx}_raw.mp3")
+                with open(out_mp3, "wb") as f:
+                    f.write(base64.b64decode(v_str))
+                if temp_files is not None:
+                    temp_files.append(out_mp3)
+                return out_mp3
+            last_err = data.get("message") or data.get("status_msg") or str(data)
+        except Exception as e:
+            last_err = str(e)
+
+    raise RuntimeError(f"TikTok TTS lỗi ({vid}): {last_err}")
+
+
 def _base_generate_audio_logic(
     srt_path: str,
     api_key=None,
@@ -73,43 +122,53 @@ def _base_generate_audio_logic(
     target_lang: str = "Tiếng Việt",
     max_speed: float = 1.35,
 ):
-    """Pure-Python Piper TTS + FFmpeg timeline assembly."""
+    """Pure-Python Piper TTS & TikTok SessionID TTS + FFmpeg timeline assembly."""
     import pysrt
     import imageio_ffmpeg
-    from piper import PiperVoice
+    from app.common.config_manager import get_config
 
     if temp_files is None:
         temp_files = []
     os.makedirs(workspace_dir, exist_ok=True)
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-    # Locate Piper ONNX model
     proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    voice_name = str(voice_model or "banmai").strip()
-    if voice_name == "vais1000":
-        voice_name = "vi_VN-vais1000-medium"
-    if not voice_name.endswith(".onnx"):
-        voice_name_onnx = f"{voice_name}.onnx"
+    voice_raw = str(voice_model or "banmai").strip()
+    is_tiktok = voice_raw.startswith("tiktok:") or voice_raw.startswith("BV") or "_" in voice_raw and not voice_raw.startswith("vi_VN-")
+
+    voice = None
+    tiktok_vid = None
+    session_id = str(api_key or "").strip() or str(get_config("tiktok_session_id", "") or "").strip()
+
+    if is_tiktok:
+        tiktok_vid = voice_raw.replace("tiktok:", "").strip()
+        if not session_id:
+            raise ValueError("Vui lòng nhập TikTok Session ID để sử dụng giọng đọc TikTok!")
     else:
-        voice_name_onnx = voice_name
+        from piper import PiperVoice
+        voice_name = voice_raw.replace("piper:", "").strip()
+        if voice_name == "vais1000":
+            voice_name = "vi_VN-vais1000-medium"
+        voice_name_onnx = voice_name if voice_name.endswith(".onnx") else f"{voice_name}.onnx"
 
-    model_path = None
-    for cand in [
-        voice_name if os.path.exists(voice_name) else "",
-        os.path.join(proj_root, "models", "piper", "vi", voice_name_onnx),
-        os.path.join(proj_root, "models", "piper", "Tiếng Việt", voice_name_onnx),
-        os.path.join(proj_root, "models", "piper", voice_name_onnx),
-        os.path.join(proj_root, "_internal", "models", "piper", "Tiếng Việt", voice_name_onnx),
-    ]:
-        if cand and os.path.exists(cand):
-            model_path = cand
-            break
+        model_path = None
+        for cand in [
+            voice_name if os.path.exists(voice_name) else "",
+            os.path.join(proj_root, "models", "piper", "vi", voice_name_onnx),
+            os.path.join(proj_root, "models", "piper", "Tiếng Việt", voice_name_onnx),
+            os.path.join(proj_root, "models", "piper", voice_name_onnx),
+            os.path.join(proj_root, "_internal", "models", "piper", "Tiếng Việt", voice_name_onnx),
+        ]:
+            if cand and os.path.exists(cand):
+                model_path = cand
+                break
 
-    if not model_path:
-        raise FileNotFoundError(f"Không tìm thấy model Piper TTS: {voice_name_onnx}")
+        if not model_path:
+            raise FileNotFoundError(f"Không tìm thấy model Piper TTS: {voice_name_onnx}")
 
-    cfg_path = model_path + ".json"
-    voice = PiperVoice.load(model_path, cfg_path if os.path.exists(cfg_path) else None)
+        cfg_path = model_path + ".json"
+        voice = PiperVoice.load(model_path, cfg_path if os.path.exists(cfg_path) else None)
+
     subs = pysrt.open(srt_path, encoding="utf-8")
     total = max(1, len(subs))
 
@@ -123,14 +182,17 @@ def _base_generate_audio_logic(
         if status_cb:
             status_cb(f"Đang tạo giọng đọc {i + 1}/{total}...")
 
-        raw_wav = fetch_piper_voice(i, sub.text, temp_files, cancel_event, workspace_dir, voice)
-        if not raw_wav or not os.path.exists(raw_wav):
+        if is_tiktok:
+            raw_audio = fetch_tiktok_voice(i, sub.text, temp_files, cancel_event, workspace_dir, tiktok_vid, session_id)
+        else:
+            raw_audio = fetch_piper_voice(i, sub.text, temp_files, cancel_event, workspace_dir, voice)
+        if not raw_audio or not os.path.exists(raw_audio):
             continue
 
         start_ms = sub.start.ordinal
         end_ms = sub.end.ordinal
         slot_sec = max(0.3, (end_ms - start_ms) / 1000.0)
-        raw_dur = get_audio_duration(raw_wav)
+        raw_dur = get_audio_duration(raw_audio)
         speed = 1.0
         if raw_dur > slot_sec and slot_sec > 0:
             speed = min(float(max_speed or 1.6), max(1.0, (raw_dur / slot_sec) * 1.02))
@@ -138,10 +200,10 @@ def _base_generate_audio_logic(
         fitted_wav = os.path.join(workspace_dir, f"temp_sub_{i}_fit.wav")
         atempo_str = _build_atempo_filter_str(speed)
         subprocess.run(
-            [ffmpeg_exe, "-y", "-i", raw_wav, "-filter:a", atempo_str, "-ar", "44100", "-ac", "1", fitted_wav],
+            [ffmpeg_exe, "-y", "-i", raw_audio, "-filter:a", atempo_str, "-ar", "44100", "-ac", "1", fitted_wav],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
         )
-        use_wav = fitted_wav if os.path.exists(fitted_wav) else raw_wav
+        use_wav = fitted_wav if os.path.exists(fitted_wav) else raw_audio
         if use_wav not in temp_files:
             temp_files.append(use_wav)
 
