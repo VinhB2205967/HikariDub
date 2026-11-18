@@ -77,6 +77,20 @@ def set_config(key: str, value) -> bool:
     return save_config(cfg)
 
 
+def get_hf_cache_dir() -> str:
+    """Return the local directory used to cache Whisper / HuggingFace models."""
+    cache_dir = os.path.join(_PROJECT_ROOT, "models", "whisper")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def get_paddleocr_cache_dir() -> str:
+    """Return the local directory used to cache PaddleOCR models."""
+    cache_dir = os.path.join(_PROJECT_ROOT, "models", "paddleocr")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
 def get_audio_sep_cache_dir() -> str:
     """Return the local directory used to cache audio-separator models."""
     cache_dir = os.path.join(_PROJECT_ROOT, "models", "audio_separator")
