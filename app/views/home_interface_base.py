@@ -7,9 +7,11 @@ import os
 import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QScrollArea, QStackedWidget, QListWidget, QFileDialog
+    QScrollArea, QStackedWidget, QListWidget, QFileDialog,
+    QDialog, QPlainTextEdit as QtPlainTextEdit, QPushButton
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF
+from PyQt6.QtGui import QImage
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, ComboBox, LineEdit, PlainTextEdit,
     ProgressBar, Pivot, InfoBar, InfoBarPosition, FluentIcon as FIF
@@ -30,6 +32,10 @@ class _TranscribeWorker(QThread):
         self.video_path = video_path
         self.workspace_dir = workspace_dir
         self.model_size = model_size
+        self._cancel = threading.Event()
+
+    def cancel(self):
+        self._cancel.set()
 
     def run(self):
         try:
@@ -49,6 +55,9 @@ class _TranscribeWorker(QThread):
 
             subs = pysrt.SubRipFile()
             for idx, seg in enumerate(segments, 1):
+                if self._cancel.is_set():
+                    self.error.emit("Đã hủy bóc băng.")
+                    return
                 start = pysrt.SubRipTime(seconds=seg.start)
                 end = pysrt.SubRipTime(seconds=seg.end)
                 subs.append(pysrt.SubRipItem(idx, start, end, seg.text.strip()))
@@ -74,6 +83,9 @@ class _TTSWorker(QThread):
         self.workspace_dir = workspace_dir
         self.voice_model = voice_model
         self._cancel = threading.Event()
+
+    def cancel(self):
+        self._cancel.set()
 
     def run(self):
         try:
@@ -107,6 +119,9 @@ class _RenderWorker(QThread):
         self.workspace_dir = workspace_dir
         self._cancel = threading.Event()
 
+    def cancel(self):
+        self._cancel.set()
+
     def run(self):
         try:
             from app.core.video_renderer import render_logic
@@ -121,9 +136,6 @@ class _RenderWorker(QThread):
                 self.error.emit("Không xuất được video.")
         except Exception as e:
             self.error.emit(str(e))
-
-
-SrtListWidget = QListWidget
 
 
 class VideoCanvasWidget(QWidget):
@@ -156,6 +168,9 @@ class VideoCanvasWidget(QWidget):
         pass
 
 
+SrtListWidget = QListWidget
+
+
 class SrtItemWidget(QWidget):
     """Subtitle item widget."""
 
@@ -183,6 +198,7 @@ class HomeInterface(QWidget):
         self._trans_srt_path = ""
         self._audio_path = ""
         self._workers = []
+        self._auto_running = False
 
         root = QHBoxLayout(self)
         self.hBoxLayout = root
@@ -202,14 +218,19 @@ class HomeInterface(QWidget):
         self.col1_container = QWidget()
         self.col1_layout = QVBoxLayout(self.col1_container)
         self.col1_layout.setContentsMargins(12, 12, 12, 12)
-        self.col1_layout.setSpacing(10)
+        self.col1_layout.setSpacing(9)
+
+        # Index 0 MUST be header label (home_interface.py styles itemAt(0))
+        self.lbl_col1_header = QLabel("✦ CẤU HÌNH DỰ ÁN & GIỌNG ĐỌC AI", self.col1_container)
+        self.col1_layout.addWidget(self.lbl_col1_header)
 
         # Video & Output selection
-        self.btn_select_video = PrimaryPushButton(FIF.VIDEO, "Chọn Video Nguồn", self.col1_container)
+        self.btn_select_video = PrimaryPushButton(FIF.VIDEO, "Chọn Video Nguồn...", self.col1_container)
         self.btn_select_video.clicked.connect(self._onSelectVideo)
         self.col1_layout.addWidget(self.btn_select_video)
 
         self.video_combo = ComboBox(self.col1_container)
+        self.video_combo.currentIndexChanged.connect(self._onVideoChanged)
         self.col1_layout.addWidget(self.video_combo)
 
         out_row = QHBoxLayout()
@@ -221,7 +242,57 @@ class HomeInterface(QWidget):
         out_row.addWidget(self.btn_select_output)
         self.col1_layout.addLayout(out_row)
 
+        # Whisper Model & TTS Voice selectors
+        lbl_stt = QLabel("Mô hình bóc băng (Whisper STT):", self.col1_container)
+        lbl_stt.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        self.col1_layout.addWidget(lbl_stt)
+        self.combo_whisper = ComboBox(self.col1_container)
+        for lbl_w, val_w in [
+            ("Tiny (Siêu tốc)", "tiny"),
+            ("Base (Nhanh)", "base"),
+            ("Small (Cân bằng - Khuyên dùng)", "small"),
+            ("Medium (Chính xác cao)", "medium"),
+            ("Large-v3 (Cao nhất)", "large-v3"),
+        ]:
+            self.combo_whisper.addItem(lbl_w, userData=val_w)
+        saved_w = get_config("whisper_model", "small")
+        for idx_w in range(self.combo_whisper.count()):
+            if self.combo_whisper.itemData(idx_w) == saved_w:
+                self.combo_whisper.setCurrentIndex(idx_w)
+                break
+        self.combo_whisper.currentIndexChanged.connect(
+            lambda i: set_config("whisper_model", self.combo_whisper.itemData(i) or "small")
+        )
+        self.col1_layout.addWidget(self.combo_whisper)
+
+        lbl_voice = QLabel("Giọng đọc AI (Piper TTS Tiếng Việt):", self.col1_container)
+        lbl_voice.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        self.col1_layout.addWidget(lbl_voice)
+        self.combo_voice = ComboBox(self.col1_container)
+        for lbl_v, val_v in [
+            ("Ban Mai (Nữ)", "banmai"),
+            ("Mạnh Dũng (Nam)", "manhdung"),
+            ("Chiêu Thanh (Nữ)", "chieuthanh"),
+            ("Lạc Phi (Nữ)", "lacphi"),
+            ("Ngọc Huyền (Nữ)", "ngochuyen"),
+            ("Vais1000 (Nữ tự nhiên)", "vais1000"),
+        ]:
+            self.combo_voice.addItem(lbl_v, userData=val_v)
+        saved_v = get_config("tts_voice", "banmai")
+        for idx_v in range(self.combo_voice.count()):
+            if self.combo_voice.itemData(idx_v) == saved_v:
+                self.combo_voice.setCurrentIndex(idx_v)
+                break
+        self.combo_voice.currentIndexChanged.connect(
+            lambda i: set_config("tts_voice", self.combo_voice.itemData(i) or "banmai")
+        )
+        self.col1_layout.addWidget(self.combo_voice)
+
         # Translation settings
+        lbl_lang = QLabel("Ngôn ngữ dịch & Phong cách:", self.col1_container)
+        lbl_lang.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        self.col1_layout.addWidget(lbl_lang)
+
         self.combo_target_lang = ComboBox(self.col1_container)
         self.combo_target_lang.addItems(["Tiếng Việt", "English", "中文", "日本語", "한국어"])
         self.col1_layout.addWidget(self.combo_target_lang)
@@ -232,7 +303,7 @@ class HomeInterface(QWidget):
 
         self.text_custom_prompt = PlainTextEdit(self.col1_container)
         self.text_custom_prompt.setPlaceholderText("Ghi chú phong cách dịch (tùy chọn)...")
-        self.text_custom_prompt.setMaximumHeight(70)
+        self.text_custom_prompt.setMaximumHeight(65)
         self.col1_layout.addWidget(self.text_custom_prompt)
 
         # Pipeline step buttons
@@ -255,15 +326,18 @@ class HomeInterface(QWidget):
         self.run_group = QFrame(self.col1_container)
         full_row = QHBoxLayout(self.run_group)
         full_row.setContentsMargins(0, 0, 0, 0)
-        self.btn_start_full = PrimaryPushButton(FIF.PLAY, "Chạy Tự Động", self.run_group)
+        self.btn_start_full = QPushButton("▶ Chạy Tự Động", self.run_group)
+        self.btn_start_full.clicked.connect(self._onStartFullClicked)
         self.btn_cancel = PushButton(FIF.CANCEL, "Hủy", self.run_group)
+        self.btn_cancel.clicked.connect(self._onCancelClicked)
         full_row.addWidget(self.btn_start_full, 1)
         full_row.addWidget(self.btn_cancel)
         self.col1_layout.addWidget(self.run_group)
 
-        # Secondary utility buttons expected by patches
+        # Secondary utility buttons
         util_row = QHBoxLayout()
         self.btn_paste_transcript = PushButton("Dán Kịch Bản", self.col1_container)
+        self.btn_paste_transcript.clicked.connect(self._onPasteTranscript)
         self.btn_upload_transcript = PushButton("Nạp SRT", self.col1_container)
         self.btn_upload_transcript.clicked.connect(self._onUploadSRT)
         util_row.addWidget(self.btn_paste_transcript)
@@ -272,7 +346,9 @@ class HomeInterface(QWidget):
 
         ov_row = QHBoxLayout()
         self.btn_add_mask = PushButton("Thêm Vùng Mờ", self.col1_container)
-        self.btn_add_logo = PushButton("Thêm Logo", self.col1_container)
+        self.btn_add_mask.clicked.connect(self._onAddMaskClicked)
+        self.btn_add_logo = PushButton("Xóa Vùng Mờ", self.col1_container)
+        self.btn_add_logo.clicked.connect(self._onClearMaskClicked)
         self.btn_add_bg_frame = PushButton("Khung Nền", self.col1_container)
         self.btn_remove_item = PushButton("Xóa", self.col1_container)
         self.btn_style = PushButton("Kiểu Chữ", self.col1_container)
@@ -299,6 +375,10 @@ class HomeInterface(QWidget):
         self.col2_layout = QVBoxLayout(self.col2_widget)
         self.col2_layout.setContentsMargins(12, 12, 12, 12)
         self.col2_layout.setSpacing(10)
+
+        # Index 0 MUST be header label (home_interface.py styles itemAt(0))
+        self.lbl_col2_header = QLabel("🎬 VIDEO ĐẦU VÀO & KHÔNG GIAN XEM TRƯỚC", self.col2_widget)
+        self.col2_layout.addWidget(self.lbl_col2_header)
 
         self.video_frame = QFrame(self.col2_widget)
         self.video_frame.setMinimumHeight(320)
@@ -332,6 +412,10 @@ class HomeInterface(QWidget):
         self.col3_layout.setContentsMargins(12, 12, 12, 12)
         self.col3_layout.setSpacing(8)
 
+        # Index 0 MUST be header label (home_interface.py styles itemAt(0))
+        self.lbl_col3_header = QLabel("📝 TRÌNH BIÊN TẬP PHỤ ĐỀ AI", self.col3_widget)
+        self.col3_layout.addWidget(self.lbl_col3_header)
+
         self.srt_pivot = Pivot(self.col3_widget)
         self.srt_stacked_widget = QStackedWidget(self.col3_widget)
         self.srt_orig_list = QListWidget(self.col3_widget)
@@ -347,6 +431,7 @@ class HomeInterface(QWidget):
         srt_btn_row = QHBoxLayout()
         self.btn_replace_all = PushButton("Thay Thế", self.col3_widget)
         self.btn_save_srt = PushButton(FIF.SAVE, "Lưu SRT", self.col3_widget)
+        self.btn_save_srt.clicked.connect(self._onSaveSrtClicked)
         srt_btn_row.addWidget(self.btn_replace_all)
         srt_btn_row.addWidget(self.btn_save_srt)
         self.col3_layout.addLayout(srt_btn_row)
@@ -370,6 +455,27 @@ class HomeInterface(QWidget):
     def get_current_srt_path(self) -> str:
         return self._trans_srt_path or self._orig_srt_path
 
+    def _preview_video_frame(self, video_path: str):
+        if not video_path or not os.path.exists(video_path):
+            return
+        try:
+            import cv2
+            cap = cv2.VideoCapture(video_path)
+            ok, frame = cap.read()
+            cap.release()
+            if ok and frame is not None:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb.shape
+                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
+                self.video_canvas.setImage(qimg)
+        except Exception as e:
+            self._appendLog(f"Không xem trước được khung hình: {e}")
+
+    def _onVideoChanged(self, idx: int):
+        vp = self.get_active_video_path()
+        if vp:
+            self._preview_video_frame(vp)
+
     def _onSelectVideo(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Chọn Video", "", "Video Files (*.mp4 *.mkv *.mov *.avi)")
         if files:
@@ -377,6 +483,7 @@ class HomeInterface(QWidget):
             self.video_combo.clear()
             for f in files:
                 self.video_combo.addItem(os.path.basename(f), userData=f)
+            self._preview_video_frame(files[0])
             self._appendLog(f"Đã nạp {len(files)} video.")
 
     def _onSelectOutput(self):
@@ -392,6 +499,61 @@ class HomeInterface(QWidget):
             self._load_srt_to_list(p, self.srt_orig_list)
             self._appendLog(f"Đã nạp phụ đề: {p}")
 
+    def _onPasteTranscript(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Dán Kịch Bản / Văn Bản")
+        dlg.resize(520, 360)
+        lay = QVBoxLayout(dlg)
+        txt = QtPlainTextEdit(dlg)
+        txt.setPlaceholderText("Dán nội dung kịch bản (mỗi dòng 1 câu)...")
+        lay.addWidget(txt)
+        btn_ok = QPushButton("Tạo Phụ Đề SRT", dlg)
+        btn_ok.clicked.connect(dlg.accept)
+        lay.addWidget(btn_ok)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            lines = [ln.strip() for ln in txt.toPlainText().splitlines() if ln.strip()]
+            if lines:
+                import pysrt
+                subs = pysrt.SubRipFile()
+                for i, line in enumerate(lines, 1):
+                    subs.append(pysrt.SubRipItem(
+                        i, pysrt.SubRipTime(seconds=(i - 1) * 3), pysrt.SubRipTime(seconds=i * 3), line
+                    ))
+                out_srt = os.path.join(self.get_active_workspace(), "pasted_orig.srt")
+                subs.save(out_srt, encoding="utf-8")
+                self._orig_srt_path = out_srt
+                self._load_srt_to_list(out_srt, self.srt_orig_list)
+                self._appendLog(f"Đã tạo SRT từ kịch bản dán: {out_srt}")
+
+    def _onSaveSrtClicked(self):
+        cur = self.get_current_srt_path()
+        if not cur or not os.path.exists(cur):
+            InfoBar.warning("Chưa có SRT", "Chưa có file phụ đề để lưu.", parent=self, position=InfoBarPosition.TOP)
+            return
+        dest, _ = QFileDialog.getSaveFileName(self, "Lưu File SRT", cur, "Subtitle Files (*.srt)")
+        if dest:
+            import shutil
+            shutil.copy2(cur, dest)
+            InfoBar.success("Đã lưu", f"Đã lưu SRT tới: {dest}", parent=self, position=InfoBarPosition.TOP)
+
+    def _onAddMaskClicked(self):
+        masks = list(getattr(self.video_canvas, "masks_rel", []) or [])
+        masks.append([0.1, 0.78, 0.8, 0.14])
+        self.video_canvas.masks_rel = masks
+        self.video_canvas.update()
+        cfg = dict(get_config("video_overlay", {}) or {})
+        cfg["mask_logos"] = masks
+        set_config("video_overlay", cfg)
+        self._appendLog(f"Đã thêm vùng làm mờ ({len(masks)} vùng).")
+
+    def _onClearMaskClicked(self):
+        self.video_canvas.masks_rel = []
+        self.video_canvas.update()
+        cfg = dict(get_config("video_overlay", {}) or {})
+        cfg["mask_logos"] = []
+        set_config("video_overlay", cfg)
+        self._appendLog("Đã xóa tất cả vùng làm mờ.")
+
     def _load_srt_to_list(self, srt_path: str, lw: QListWidget):
         lw.clear()
         try:
@@ -401,6 +563,22 @@ class HomeInterface(QWidget):
                 lw.addItem(f"[{s.index}] {s.start} -> {s.end}\n{s.text}")
         except Exception as e:
             self._appendLog(f"Lỗi đọc SRT: {e}")
+
+    def _onStartFullClicked(self):
+        vp = self.get_active_video_path()
+        if not vp or not os.path.exists(vp):
+            InfoBar.warning("Thiếu video", "Vui lòng chọn video nguồn trước.", parent=self, position=InfoBarPosition.TOP)
+            return
+        self._auto_running = True
+        self._appendLog("▶ Bắt đầu quy trình tự động: STT → Dịch → TTS → Render...")
+        self._onStep1Clicked()
+
+    def _onCancelClicked(self):
+        self._auto_running = False
+        for w in self._workers:
+            if hasattr(w, "cancel"):
+                w.cancel()
+        self._appendLog("Đã gửi yêu cầu hủy tác vụ.")
 
     def _onStep1Clicked(self):
         vp = self.get_active_video_path()
@@ -419,9 +597,13 @@ class HomeInterface(QWidget):
         self._orig_srt_path = srt_path
         self._load_srt_to_list(srt_path, self.srt_orig_list)
         self._appendLog(f"Bóc băng hoàn tất: {srt_path}")
-        InfoBar.success("Hoàn tất", "Đã bóc băng phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
+        if self._auto_running:
+            self._onTranslateClicked()
+        else:
+            InfoBar.success("Hoàn tất", "Đã bóc băng phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
 
     def _onTranscribeError(self, err: str):
+        self._auto_running = False
         self._appendLog(f"[LỖI] {err}")
         InfoBar.error("Lỗi", str(err), parent=self, position=InfoBarPosition.TOP)
 
@@ -434,7 +616,10 @@ class HomeInterface(QWidget):
         self.srt_pivot.setCurrentItem("trans")
         self.srt_stacked_widget.setCurrentWidget(self.srt_trans_list)
         self._appendLog(f"Dịch hoàn tất: {srt_path}")
-        InfoBar.success("Hoàn tất", "Đã dịch phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
+        if self._auto_running:
+            self._onVoiceClicked()
+        else:
+            InfoBar.success("Hoàn tất", "Đã dịch phụ đề xong!", parent=self, position=InfoBarPosition.TOP)
 
     def _onVoiceClicked(self):
         srt = self.get_current_srt_path()
@@ -452,7 +637,10 @@ class HomeInterface(QWidget):
     def _onVoiceFinished(self, wav_path: str):
         self._audio_path = wav_path
         self._appendLog(f"Tạo giọng đọc hoàn tất: {wav_path}")
-        InfoBar.success("Hoàn tất", "Đã tạo giọng đọc xong!", parent=self, position=InfoBarPosition.TOP)
+        if self._auto_running:
+            self._onStep4Clicked()
+        else:
+            InfoBar.success("Hoàn tất", "Đã tạo giọng đọc xong!", parent=self, position=InfoBarPosition.TOP)
 
     def _onStep4Clicked(self):
         vp = self.get_active_video_path()
@@ -468,6 +656,7 @@ class HomeInterface(QWidget):
         w.start()
 
     def _onRenderFinished(self, mp4_path: str):
+        self._auto_running = False
         self._appendLog(f"Xuất video hoàn tất: {mp4_path}")
         InfoBar.success("Thành công", f"Đã xuất video: {os.path.basename(mp4_path)}", parent=self, position=InfoBarPosition.TOP)
 
