@@ -252,12 +252,14 @@ class HomeInterface(QWidget):
         self.btn_step4.clicked.connect(self._onStep4Clicked)
         self.col1_layout.addWidget(self.btn_step4)
 
-        full_row = QHBoxLayout()
-        self.btn_start_full = PrimaryPushButton(FIF.PLAY, "Chạy Tự Động", self.col1_container)
-        self.btn_cancel = PushButton(FIF.CANCEL, "Hủy", self.col1_container)
+        self.run_group = QFrame(self.col1_container)
+        full_row = QHBoxLayout(self.run_group)
+        full_row.setContentsMargins(0, 0, 0, 0)
+        self.btn_start_full = PrimaryPushButton(FIF.PLAY, "Chạy Tự Động", self.run_group)
+        self.btn_cancel = PushButton(FIF.CANCEL, "Hủy", self.run_group)
         full_row.addWidget(self.btn_start_full, 1)
         full_row.addWidget(self.btn_cancel)
-        self.col1_layout.addLayout(full_row)
+        self.col1_layout.addWidget(self.run_group)
 
         # Secondary utility buttons expected by patches
         util_row = QHBoxLayout()
