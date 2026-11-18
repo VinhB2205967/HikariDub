@@ -86,6 +86,8 @@ def _base_generate_audio_logic(
     # Locate Piper ONNX model
     proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     voice_name = str(voice_model or "banmai").strip()
+    if voice_name == "vais1000":
+        voice_name = "vi_VN-vais1000-medium"
     if not voice_name.endswith(".onnx"):
         voice_name_onnx = f"{voice_name}.onnx"
     else:
@@ -94,6 +96,7 @@ def _base_generate_audio_logic(
     model_path = None
     for cand in [
         voice_name if os.path.exists(voice_name) else "",
+        os.path.join(proj_root, "models", "piper", "vi", voice_name_onnx),
         os.path.join(proj_root, "models", "piper", "Tiếng Việt", voice_name_onnx),
         os.path.join(proj_root, "models", "piper", voice_name_onnx),
         os.path.join(proj_root, "_internal", "models", "piper", "Tiếng Việt", voice_name_onnx),
