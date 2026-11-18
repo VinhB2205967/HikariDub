@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QStackedWidget, QListWidget, QFileDialog
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, ComboBox, LineEdit, PlainTextEdit,
     ProgressBar, Pivot, InfoBar, InfoBarPosition, FluentIcon as FIF
@@ -124,6 +124,36 @@ class _RenderWorker(QThread):
 
 
 SrtListWidget = QListWidget
+
+
+class VideoCanvasWidget(QWidget):
+    """Custom video preview canvas compatible with canvas_transform & home_interface patches."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_image = None
+        self.masks_rel = []
+        self.config = {}
+        self.logo_rel = None
+        self.sub_rel = None
+        self._canvas_transform = None
+
+    def setImage(self, img):
+        self.current_image = img
+        self.update()
+
+    def _getVideoRect(self):
+        return (0.0, 0.0, float(self.width()), float(self.height()))
+
+    def get_video_rect(self):
+        return self._getVideoRect()
+
+    def _getMaskRect(self, m):
+        vx, vy, vw, vh = self._getVideoRect()
+        return QRectF(vx + float(m[0]) * vw, vy + float(m[1]) * vh, float(m[2]) * vw, float(m[3]) * vh)
+
+    def saveConfig(self):
+        pass
 
 
 class SrtItemWidget(QWidget):
@@ -273,11 +303,14 @@ class HomeInterface(QWidget):
         self.video_frame.setStyleSheet("QFrame { background: #0B0F1A; border: 1px solid #1E293B; border-radius: 10px; }")
         vf_lay = QVBoxLayout(self.video_frame)
         vf_lay.setContentsMargins(0, 0, 0, 0)
-        self.video_canvas = QLabel("Chọn video để xem trước & xử lý", self.video_frame)
-        self.video_canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_canvas.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 13px; border: none;")
+        self.video_canvas = VideoCanvasWidget(self.video_frame)
         vf_lay.addWidget(self.video_canvas, 1)
         self.col2_layout.addWidget(self.video_frame, 3)
+
+        self.row2_widget = QWidget(self.col2_widget)
+        self.row2_layout = QHBoxLayout(self.row2_widget)
+        self.row2_layout.setContentsMargins(0, 0, 0, 0)
+        self.col2_layout.addWidget(self.row2_widget)
 
         self.progress_bar = ProgressBar(self.col2_widget)
         self.progress_bar.setValue(0)
