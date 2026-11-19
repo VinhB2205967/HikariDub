@@ -313,14 +313,6 @@ class HomeInterface(QWidget):
         )
         self.col1_layout.addWidget(self.combo_voice)
 
-        self.line_tiktok_session = LineEdit(self.col1_container)
-        self.line_tiktok_session.setPlaceholderText("TikTok Session ID (chỉ cần nếu dùng giọng TikTok)...")
-        self.line_tiktok_session.setText(get_config("tiktok_session_id", "") or "")
-        self.line_tiktok_session.textChanged.connect(
-            lambda txt: set_config("tiktok_session_id", txt.strip())
-        )
-        self.col1_layout.addWidget(self.line_tiktok_session)
-
         # Translation settings
         lbl_lang = QLabel("Ngôn ngữ dịch & Phong cách:", self.col1_container)
         lbl_lang.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")

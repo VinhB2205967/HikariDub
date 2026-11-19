@@ -193,6 +193,27 @@ class SettingInterface(QWidget):
         gt_lay.addWidget(self.txt_api_keys)
 
         trans_lay.addWidget(self.group_trans)
+
+        # TikTok TTS Session ID Card
+        self.group_tiktok = QFrame(self.page_trans)
+        self.group_tiktok.setStyleSheet(f"QFrame {{ background: {Colors.BG_DARK}; border: 1px solid {Colors.BORDER}; border-radius: 12px; }}")
+        tk_lay = QVBoxLayout(self.group_tiktok)
+        tk_lay.setContentsMargins(16, 14, 16, 14)
+        tk_lay.setSpacing(8)
+
+        lbl_tk_title = QLabel("🎙️ Cấu hình TikTok TTS Session ID", self.group_tiktok)
+        lbl_tk_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: 700; font-size: 14px; border: none;")
+        tk_lay.addWidget(lbl_tk_title)
+
+        lbl_tk_hint = QLabel("Nhập cookie `sessionid` của tài khoản TikTok để dùng 18 giọng đọc TikTok (BV074, BV075, en_us_002...):", self.group_tiktok)
+        lbl_tk_hint.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px; border: none;")
+        tk_lay.addWidget(lbl_tk_hint)
+
+        self.line_tiktok_session = LineEdit(self.group_tiktok)
+        self.line_tiktok_session.setPlaceholderText("Dán TikTok Session ID vào đây rồi nhấn Lưu Cài Đặt...")
+        tk_lay.addWidget(self.line_tiktok_session)
+
+        trans_lay.addWidget(self.group_tiktok)
         trans_lay.addStretch(1)
 
         # Page 2: General & Models
@@ -284,6 +305,7 @@ class SettingInterface(QWidget):
         self._select_gemini_model(saved_model, save_now=False)
         keys = self.config.get("gemini_keys") or []
         self.txt_api_keys.setPlainText("\n".join(keys))
+        self.line_tiktok_session.setText(self.config.get("tiktok_session_id") or "")
         self.line_output_dir.setText(self.config.get("output_dir") or os.path.join(os.getcwd(), "Output"))
 
     def _saveConfig(self, show_msg: bool = True):
@@ -292,6 +314,7 @@ class SettingInterface(QWidget):
             self.config["gemini_model"] = self._gemini_model_options[idx][1]
         keys = [k.strip() for k in self.txt_api_keys.toPlainText().splitlines() if k.strip()]
         self.config["gemini_keys"] = keys
+        self.config["tiktok_session_id"] = self.line_tiktok_session.text().strip()
         out_dir = self.line_output_dir.text().strip()
         if out_dir:
             self.config["output_dir"] = out_dir
