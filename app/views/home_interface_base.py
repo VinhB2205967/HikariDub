@@ -366,29 +366,11 @@ class HomeInterface(QWidget):
         full_row.addWidget(self.btn_cancel)
         self.col1_layout.addWidget(self.run_group)
 
-        # Secondary utility buttons
-        util_row = QHBoxLayout()
-        self.btn_paste_transcript = PushButton("Dán Kịch Bản", self.col1_container)
-        self.btn_paste_transcript.clicked.connect(self._onPasteTranscript)
-        self.btn_upload_transcript = PushButton("Nạp SRT", self.col1_container)
-        self.btn_upload_transcript.clicked.connect(self._onUploadSRT)
-        util_row.addWidget(self.btn_paste_transcript)
-        util_row.addWidget(self.btn_upload_transcript)
-        self.col1_layout.addLayout(util_row)
-
-        ov_row = QHBoxLayout()
-        self.btn_add_mask = PushButton("Thêm Vùng Mờ", self.col1_container)
-        self.btn_add_mask.clicked.connect(self._onAddMaskClicked)
-        self.btn_add_logo = PushButton("Xóa Vùng Mờ", self.col1_container)
-        self.btn_add_logo.clicked.connect(self._onClearMaskClicked)
+        # Hidden compatibility controls expected by home_interface.py patches
         self.btn_add_bg_frame = PushButton("Khung Nền", self.col1_container)
         self.btn_remove_item = PushButton("Xóa", self.col1_container)
         self.btn_style = PushButton("Kiểu Chữ", self.col1_container)
         self.btn_apply_all = PushButton("Áp Dụng", self.col1_container)
-        ov_row.addWidget(self.btn_add_mask)
-        ov_row.addWidget(self.btn_add_logo)
-        self.col1_layout.addLayout(ov_row)
-
         self.line_wm = LineEdit(self.col1_container)
         self.line_wm.setPlaceholderText("Watermark (tùy chọn)...")
         self.line_wm.hide()
@@ -421,9 +403,25 @@ class HomeInterface(QWidget):
         vf_lay.addWidget(self.video_canvas, 1)
         self.col2_layout.addWidget(self.video_frame, 3)
 
+        # Quick tools bar right under the video preview frame
         self.row2_widget = QWidget(self.col2_widget)
         self.row2_layout = QHBoxLayout(self.row2_widget)
-        self.row2_layout.setContentsMargins(0, 0, 0, 0)
+        self.row2_layout.setContentsMargins(4, 4, 4, 4)
+        self.row2_layout.setSpacing(8)
+
+        self.btn_paste_transcript = PushButton("Dán Kịch Bản", self.row2_widget)
+        self.btn_paste_transcript.clicked.connect(self._onPasteTranscript)
+        self.btn_upload_transcript = PushButton("Nạp SRT", self.row2_widget)
+        self.btn_upload_transcript.clicked.connect(self._onUploadSRT)
+        self.btn_add_mask = PushButton("Thêm Vùng Mờ", self.row2_widget)
+        self.btn_add_mask.clicked.connect(self._onAddMaskClicked)
+        self.btn_add_logo = PushButton("Xóa Vùng Mờ", self.row2_widget)
+        self.btn_add_logo.clicked.connect(self._onClearMaskClicked)
+
+        self.row2_layout.addWidget(self.btn_paste_transcript, 1)
+        self.row2_layout.addWidget(self.btn_upload_transcript, 1)
+        self.row2_layout.addWidget(self.btn_add_mask, 1)
+        self.row2_layout.addWidget(self.btn_add_logo, 1)
         self.col2_layout.addWidget(self.row2_widget)
 
         self.progress_bar = ProgressBar(self.col2_widget)
