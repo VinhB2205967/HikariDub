@@ -143,7 +143,7 @@ class _RenderWorker(QThread):
 
 
 class VideoCanvasWidget(QWidget):
-    """Custom video preview canvas compatible with canvas_transform & home_interface patches."""
+    """Custom video preview canvas with draggable/resizable Mask, Logo, and Watermark overlays."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -151,8 +151,16 @@ class VideoCanvasWidget(QWidget):
         self.masks_rel = []
         self.config = {}
         self.logo_rel = None
+        self.logo_path = ""
+        self.logo_image = None
+        self.wm_rel = [0.04, 0.04, 0.34, 0.09]
+        self.watermark_text = ""
         self.sub_rel = None
         self._canvas_transform = None
+        self._drag_target = None  # ('mask', idx, mode) | ('logo', 0, mode) | ('wm', 0, mode)
+        self._drag_start = None
+        self._drag_orig_rect = None
+        self.setMouseTracking(True)
 
     def setImage(self, img):
         self.current_image = img
@@ -168,8 +176,101 @@ class VideoCanvasWidget(QWidget):
         vx, vy, vw, vh = self._getVideoRect()
         return QRectF(vx + float(m[0]) * vw, vy + float(m[1]) * vh, float(m[2]) * vw, float(m[3]) * vh)
 
+    def _hit_test_overlay(self, px: float, py: float):
+        vx, vy, vw, vh = self._getVideoRect()
+        if vw <= 1 or vh <= 1:
+            return None
+        handle = 14.0
+        # Check masks (top-most first)
+        for i in range(len(self.masks_rel) - 1, -1, -1):
+            r = self._getMaskRect(self.masks_rel[i])
+            if abs(px - r.right()) <= handle and abs(py - r.bottom()) <= handle:
+                return ("mask", i, "resize", list(self.masks_rel[i]))
+            if r.contains(px, py):
+                return ("mask", i, "move", list(self.masks_rel[i]))
+        # Check logo
+        if self.logo_rel and self.logo_image is not None:
+            r = self._getMaskRect(self.logo_rel)
+            if abs(px - r.right()) <= handle and abs(py - r.bottom()) <= handle:
+                return ("logo", 0, "resize", list(self.logo_rel))
+            if r.contains(px, py):
+                return ("logo", 0, "move", list(self.logo_rel))
+        # Check watermark
+        if self.watermark_text and self.wm_rel:
+            r = self._getMaskRect(self.wm_rel)
+            if abs(px - r.right()) <= handle and abs(py - r.bottom()) <= handle:
+                return ("wm", 0, "resize", list(self.wm_rel))
+            if r.contains(px, py):
+                return ("wm", 0, "move", list(self.wm_rel))
+        return None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position()
+            hit = self._hit_test_overlay(pos.x(), pos.y())
+            if hit:
+                self._drag_target = (hit[0], hit[1], hit[2])
+                self._drag_start = (pos.x(), pos.y())
+                self._drag_orig_rect = hit[3]
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        pos = event.position()
+        if self._drag_target and self._drag_start and self._drag_orig_rect:
+            vx, vy, vw, vh = self._getVideoRect()
+            if vw > 1 and vh > 1:
+                dx = (pos.x() - self._drag_start[0]) / vw
+                dy = (pos.y() - self._drag_start[1]) / vh
+                ox, oy, ow, oh = self._drag_orig_rect
+                kind, idx, mode = self._drag_target
+                if mode == "move":
+                    nx = max(0.0, min(1.0 - ow, ox + dx))
+                    ny = max(0.0, min(1.0 - oh, oy + dy))
+                    new_rect = [nx, ny, ow, oh]
+                else:
+                    nw = max(0.05, min(1.0 - ox, ow + dx))
+                    nh = max(0.04, min(1.0 - oy, oh + dy))
+                    new_rect = [ox, oy, nw, nh]
+                if kind == "mask" and 0 <= idx < len(self.masks_rel):
+                    self.masks_rel[idx] = new_rect
+                elif kind == "logo":
+                    self.logo_rel = new_rect
+                elif kind == "wm":
+                    self.wm_rel = new_rect
+                self.update()
+                event.accept()
+                return
+        else:
+            hit = self._hit_test_overlay(pos.x(), pos.y())
+            if hit:
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor if hit[2] == "resize" else Qt.CursorShape.SizeAllCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_target:
+            self._drag_target = None
+            self._drag_start = None
+            self._drag_orig_rect = None
+            self.saveConfig()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def saveConfig(self):
-        pass
+        try:
+            cfg = dict(get_config("video_overlay", {}) or {})
+            cfg["mask_logos"] = list(self.masks_rel or [])
+            cfg["logo_path"] = self.logo_path or ""
+            cfg["logo_rel"] = list(self.logo_rel) if self.logo_rel else None
+            cfg["watermark_text"] = self.watermark_text or ""
+            cfg["wm_rel"] = list(self.wm_rel) if self.wm_rel else None
+            set_config("video_overlay", cfg)
+        except Exception:
+            pass
 
 
 SrtListWidget = QListWidget
@@ -235,6 +336,7 @@ class HomeInterface(QWidget):
         self.col1_layout.addWidget(self.btn_select_video)
 
         self.video_combo = ComboBox(self.col1_container)
+        self.video_combo.addItem("Chưa có video nào được chọn", userData="")
         self.video_combo.currentIndexChanged.connect(self._onVideoChanged)
         self.col1_layout.addWidget(self.video_combo)
 
@@ -308,10 +410,26 @@ class HomeInterface(QWidget):
             if self.combo_voice.itemData(idx_v) == saved_v:
                 self.combo_voice.setCurrentIndex(idx_v)
                 break
-        self.combo_voice.currentIndexChanged.connect(
-            lambda i: set_config("tts_voice", self.combo_voice.itemData(i) or "piper:banmai")
-        )
+        self.combo_voice.currentIndexChanged.connect(self._onVoiceSelectionChanged)
         self.col1_layout.addWidget(self.combo_voice)
+
+        # Conditional TikTok Session ID container (visible only when a TikTok voice is selected)
+        self.tiktok_session_box = QWidget(self.col1_container)
+        tk_box_lay = QVBoxLayout(self.tiktok_session_box)
+        tk_box_lay.setContentsMargins(0, 2, 0, 2)
+        tk_box_lay.setSpacing(4)
+        lbl_tk_sid = QLabel("TikTok Session ID (bắt buộc cho giọng TikTok):", self.tiktok_session_box)
+        lbl_tk_sid.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 600;")
+        tk_box_lay.addWidget(lbl_tk_sid)
+        self.line_tiktok_session = LineEdit(self.tiktok_session_box)
+        self.line_tiktok_session.setPlaceholderText("Dán cookie sessionid TikTok vào đây...")
+        self.line_tiktok_session.setText(get_config("tiktok_session_id", "") or "")
+        self.line_tiktok_session.textChanged.connect(
+            lambda txt: set_config("tiktok_session_id", txt.strip())
+        )
+        tk_box_lay.addWidget(self.line_tiktok_session)
+        self.col1_layout.addWidget(self.tiktok_session_box)
+        self._update_tiktok_session_visibility()
 
         # Translation settings
         lbl_lang = QLabel("Ngôn ngữ dịch & Phong cách:", self.col1_container)
@@ -349,14 +467,22 @@ class HomeInterface(QWidget):
         self.col1_layout.addWidget(self.btn_step4)
 
         self.run_group = QFrame(self.col1_container)
-        full_row = QHBoxLayout(self.run_group)
-        full_row.setContentsMargins(0, 0, 0, 0)
-        self.btn_start_full = QPushButton("▶ Chạy Tự Động", self.run_group)
+        full_col = QVBoxLayout(self.run_group)
+        full_col.setContentsMargins(8, 8, 8, 8)
+        full_col.setSpacing(6)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.btn_start_full = QPushButton("▶ BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)", self.run_group)
+        self.btn_start_full.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_start_full.setMinimumHeight(38)
+        self.btn_start_full.setToolTip("BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG) — Chạy lần lượt STT → Dịch → TTS → Xuất Video")
         self.btn_start_full.clicked.connect(self._onStartFullClicked)
-        self.btn_cancel = PushButton(FIF.CANCEL, "Hủy", self.run_group)
+        self.btn_cancel = PushButton("⏹ HỦY TIẾN TRÌNH", self.run_group)
+        self.btn_cancel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_cancel.setMinimumHeight(32)
+        self.btn_cancel.setToolTip("HỦY TIẾN TRÌNH — Dừng tác vụ đang chạy")
         self.btn_cancel.clicked.connect(self._onCancelClicked)
-        full_row.addWidget(self.btn_start_full, 1)
-        full_row.addWidget(self.btn_cancel)
+        full_col.addWidget(self.btn_start_full)
+        full_col.addWidget(self.btn_cancel)
         self.col1_layout.addWidget(self.run_group)
 
         # Hidden compatibility controls expected by home_interface.py patches
@@ -426,18 +552,26 @@ class HomeInterface(QWidget):
         self.row2_layout.setSpacing(8)
 
         self.btn_paste_transcript = PushButton("Dán Kịch Bản", self.row2_widget)
+        self.btn_paste_transcript.setToolTip("Dán kịch bản văn bản để tạo SRT")
         self.btn_paste_transcript.clicked.connect(self._onPasteTranscript)
         self.btn_upload_transcript = PushButton("Nạp SRT", self.row2_widget)
+        self.btn_upload_transcript.setToolTip("Chọn file phụ đề .srt từ máy")
         self.btn_upload_transcript.clicked.connect(self._onUploadSRT)
-        self.btn_add_mask = PushButton("Thêm Vùng Mờ", self.row2_widget)
+        self.btn_add_mask = PushButton("Vùng Che", self.row2_widget)
+        self.btn_add_mask.setToolTip("Thêm vùng làm mờ (kéo thả & chỉnh kích thước trực tiếp trên khung video)")
         self.btn_add_mask.clicked.connect(self._onAddMaskClicked)
-        self.btn_add_logo = PushButton("Xóa Vùng Mờ", self.row2_widget)
-        self.btn_add_logo.clicked.connect(self._onClearMaskClicked)
+        self.btn_add_logo = PushButton("Logo", self.row2_widget)
+        self.btn_add_logo.setToolTip("Chọn ảnh Logo chèn lên video (kéo thả & chỉnh kích thước trực tiếp)")
+        self.btn_add_logo.clicked.connect(self._onAddLogoClicked)
+        self.btn_add_wm = PushButton("Watermark", self.row2_widget)
+        self.btn_add_wm.setToolTip("Thêm chữ Watermark lên video (kéo thả & chỉnh kích thước trực tiếp)")
+        self.btn_add_wm.clicked.connect(self._onAddWatermarkClicked)
 
         self.row2_layout.addWidget(self.btn_paste_transcript, 1)
         self.row2_layout.addWidget(self.btn_upload_transcript, 1)
         self.row2_layout.addWidget(self.btn_add_mask, 1)
         self.row2_layout.addWidget(self.btn_add_logo, 1)
+        self.row2_layout.addWidget(self.btn_add_wm, 1)
         self.col2_layout.addWidget(self.row2_widget)
 
         self.progress_bar = ProgressBar(self.col2_widget)
@@ -452,8 +586,8 @@ class HomeInterface(QWidget):
 
         # ── Column 3: Subtitles ──
         self.col3_widget = QFrame(self)
-        self.col3_widget.setMinimumWidth(280)
-        self.col3_widget.setMaximumWidth(360)
+        self.col3_widget.setMinimumWidth(300)
+        self.col3_widget.setMaximumWidth(380)
         self.col3_layout = QVBoxLayout(self.col3_widget)
         self.col3_layout.setContentsMargins(12, 12, 12, 12)
         self.col3_layout.setSpacing(8)
@@ -474,13 +608,36 @@ class HomeInterface(QWidget):
         self.col3_layout.addWidget(self.srt_pivot)
         self.col3_layout.addWidget(self.srt_stacked_widget, 1)
 
-        srt_btn_row = QHBoxLayout()
-        self.btn_replace_all = PushButton("Thay Thế", self.col3_widget)
-        self.btn_save_srt = PushButton(FIF.SAVE, "Lưu SRT", self.col3_widget)
+        # Find & Replace inputs
+        fr_row = QHBoxLayout()
+        fr_row.setSpacing(6)
+        self.input_find = LineEdit(self.col3_widget)
+        self.input_find.setPlaceholderText("Tìm từ...")
+        self.input_replace = LineEdit(self.col3_widget)
+        self.input_replace.setPlaceholderText("Thay bằng...")
+        fr_row.addWidget(self.input_find, 1)
+        fr_row.addWidget(self.input_replace, 1)
+        self.col3_layout.addLayout(fr_row)
+
+        # Stacked full-width buttons so Vietnamese labels NEVER clip
+        srt_btn_col = QVBoxLayout()
+        srt_btn_col.setSpacing(6)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.btn_replace_all = PushButton("🔄 Thay thế tất cả", self.col3_widget)
+        self.btn_replace_all.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_replace_all.setMinimumHeight(32)
+        self.btn_replace_all.setToolTip("Thay thế tất cả từ khớp trong phụ đề hiện tại")
+        self.btn_replace_all.clicked.connect(self._onReplaceAllClicked)
+
+        self.btn_save_srt = PushButton("💾 Lưu Kịch Bản (SRT)", self.col3_widget)
+        self.btn_save_srt.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_save_srt.setMinimumHeight(34)
+        self.btn_save_srt.setToolTip("Lưu kịch bản phụ đề ra file .srt")
         self.btn_save_srt.clicked.connect(self._onSaveSrtClicked)
-        srt_btn_row.addWidget(self.btn_replace_all)
-        srt_btn_row.addWidget(self.btn_save_srt)
-        self.col3_layout.addLayout(srt_btn_row)
+
+        srt_btn_col.addWidget(self.btn_replace_all)
+        srt_btn_col.addWidget(self.btn_save_srt)
+        self.col3_layout.addLayout(srt_btn_col)
         root.addWidget(self.col3_widget)
 
     def _appendLog(self, msg: str):
@@ -651,6 +808,74 @@ class HomeInterface(QWidget):
             import shutil
             shutil.copy2(cur, dest)
             InfoBar.success("Đã lưu", f"Đã lưu SRT tới: {dest}", parent=self, position=InfoBarPosition.TOP)
+
+    def _onVoiceSelectionChanged(self, idx: int):
+        voice_id = self.combo_voice.itemData(idx) or "piper:banmai"
+        set_config("tts_voice", voice_id)
+        self._update_tiktok_session_visibility()
+
+    def _update_tiktok_session_visibility(self):
+        if not hasattr(self, "tiktok_session_box"):
+            return
+        voice_id = str(self.combo_voice.currentData() or "")
+        is_tiktok = voice_id.startswith("tiktok:")
+        self.tiktok_session_box.setVisible(is_tiktok)
+        if is_tiktok and hasattr(self, "line_tiktok_session"):
+            saved = get_config("tiktok_session_id", "") or ""
+            if self.line_tiktok_session.text().strip() != saved:
+                self.line_tiktok_session.blockSignals(True)
+                self.line_tiktok_session.setText(saved)
+                self.line_tiktok_session.blockSignals(False)
+
+    def _onAddLogoClicked(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn ảnh Logo", "", "Image Files (*.png *.jpg *.jpeg *.webp)")
+        if not p:
+            return
+        img = QImage(p)
+        if img.isNull():
+            InfoBar.error("Lỗi ảnh", "Không đọc được file ảnh Logo.", parent=self, position=InfoBarPosition.TOP)
+            return
+        self.video_canvas.logo_path = p
+        self.video_canvas.logo_image = img
+        if not self.video_canvas.logo_rel:
+            self.video_canvas.logo_rel = [0.76, 0.05, 0.18, 0.14]
+        self.video_canvas.saveConfig()
+        self.video_canvas.update()
+        self._appendLog(f"Đã thêm Logo (kéo thả & kéo góc dưới-phải để chỉnh kích thước): {os.path.basename(p)}")
+
+    def _onAddWatermarkClicked(self):
+        from PyQt6.QtWidgets import QInputDialog
+        cur = getattr(self.video_canvas, "watermark_text", "") or ""
+        text, ok = QInputDialog.getText(self, "Watermark", "Nhập chữ Watermark (để trống để tắt):", text=cur)
+        if ok:
+            self.video_canvas.watermark_text = text.strip()
+            if not self.video_canvas.wm_rel:
+                self.video_canvas.wm_rel = [0.04, 0.04, 0.34, 0.09]
+            self.video_canvas.saveConfig()
+            self.video_canvas.update()
+            self._appendLog(f"Đã cập nhật Watermark: '{text.strip()}'" if text.strip() else "Đã tắt Watermark.")
+
+    def _onReplaceAllClicked(self):
+        find_txt = self.input_find.text() if hasattr(self, "input_find") else ""
+        repl_txt = self.input_replace.text() if hasattr(self, "input_replace") else ""
+        srt = self.get_current_srt_path()
+        if not find_txt or not srt or not os.path.exists(srt):
+            InfoBar.warning("Thông báo", "Vui lòng nhập từ cần tìm và đảm bảo đã có phụ đề.", parent=self, position=InfoBarPosition.TOP)
+            return
+        try:
+            import pysrt
+            subs = pysrt.open(srt, encoding="utf-8")
+            cnt = 0
+            for s in subs:
+                if find_txt in s.text:
+                    s.text = s.text.replace(find_txt, repl_txt)
+                    cnt += 1
+            subs.save(srt, encoding="utf-8")
+            target_list = self.srt_trans_list if srt == self._trans_srt_path else self.srt_orig_list
+            self._load_srt_to_list(srt, target_list)
+            InfoBar.success("Hoàn tất", f"Đã thay thế {cnt} dòng phụ đề.", parent=self, position=InfoBarPosition.TOP)
+        except Exception as e:
+            InfoBar.error("Lỗi", str(e), parent=self, position=InfoBarPosition.TOP)
 
     def _onAddMaskClicked(self):
         masks = list(getattr(self.video_canvas, "masks_rel", []) or [])

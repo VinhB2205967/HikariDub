@@ -38,14 +38,23 @@ def render_logic(
         status_cb("Đang bắt đầu xuất video...")
 
     cmd = [ffmpeg_exe, "-y", "-i", video_path]
-    has_audio = bool(audio_path and os.path.exists(audio_path))
+    has_audio = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 100)
     if has_audio:
         cmd.extend(["-i", audio_path])
 
     vf_parts = []
-    if srt_path and os.path.exists(srt_path):
-        esc_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+    if srt_path and os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+        esc_srt = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
         vf_parts.append(f"subtitles='{esc_srt}'")
+
+    # Optional watermark text overlay from video_config
+    wm_text = str((video_config or {}).get("watermark_text") or "").strip()
+    if wm_text:
+        wm_rel = (video_config or {}).get("wm_rel") or [0.05, 0.05, 0.3, 0.08]
+        wx = max(0.0, min(0.95, float(wm_rel[0])))
+        wy = max(0.0, min(0.95, float(wm_rel[1])))
+        safe_wm = wm_text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        vf_parts.append(f"drawtext=text='{safe_wm}':fontcolor=white@0.85:fontsize=28:box=1:boxcolor=black@0.45:boxborderw=6:x=w*{wx:.4f}:y=h*{wy:.4f}")
 
     if vf_parts:
         cmd.extend(["-vf", ",".join(vf_parts)])
@@ -53,18 +62,25 @@ def render_logic(
     if has_audio:
         cmd.extend(["-map", "0:v:0", "-map", "1:a:0", "-shortest"])
 
-    cmd.extend(["-c:v", "libx264", "-crf", "18", "-c:a", "aac", "-b:a", "192k", out_path])
+    cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out_path])
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    while proc.poll() is None:
-        if cancel_event and cancel_event.is_set():
-            proc.terminate()
-            return None
-        import time
-        time.sleep(0.2)
+    err_log = os.path.join(workspace_dir, "_ffmpeg_render.log")
+    with open(err_log, "wb") as err_f:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err_f)
+        while proc.poll() is None:
+            if cancel_event and cancel_event.is_set():
+                proc.terminate()
+                return None
+            import time
+            time.sleep(0.2)
 
-    if proc.returncode != 0:
-        err = proc.stderr.read().decode("utf-8", errors="ignore")[-500:]
+    if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) < 1000:
+        err = ""
+        try:
+            with open(err_log, "r", encoding="utf-8", errors="ignore") as f:
+                err = f.read()[-600:]
+        except Exception:
+            pass
         raise RuntimeError(f"FFmpeg lỗi ({proc.returncode}): {err}")
 
     if status_cb:

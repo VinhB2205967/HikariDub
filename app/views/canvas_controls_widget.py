@@ -383,6 +383,8 @@ class CanvasControlsWidget(QWidget):
 
         # Expand / Theater Mode button
         self.btn_theater = PushButton("⛶ Xem Rộng (Theater)")
+        self.btn_theater.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.btn_theater.setMinimumWidth(165)
         self.btn_theater.setStyleSheet(f"""
             PushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366F1, stop:1 #8B5CF6);
@@ -391,7 +393,7 @@ class CanvasControlsWidget(QWidget):
                 color: #FFFFFF;
                 font-size: 11px;
                 font-weight: 700;
-                padding: 3px 10px;
+                padding: 3px 12px;
                 min-height: 24px;
                 max-height: 24px;
             }}
@@ -400,15 +402,17 @@ class CanvasControlsWidget(QWidget):
                 border-color: #C084FC;
             }}
         """)
-        self.btn_theater.setToolTip("Mở rộng tối đa không gian xem trước (ẩn tạm thời 2 cột bên)")
+        self.btn_theater.setToolTip("Xem Rộng (Theater) — Mở rộng tối đa không gian xem trước (ẩn tạm thời 2 cột bên)")
         self.btn_theater.clicked.connect(self.theater_toggled.emit)
         row2.addWidget(self.btn_theater)
 
         # Pop-out Floating Window button
         self.btn_popout = PushButton("🔍 Cửa Sổ Riêng")
+        self.btn_popout.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.btn_popout.setMinimumWidth(126)
         self.btn_popout.setStyleSheet(_BTN_STYLE)
         self.btn_popout.setFixedHeight(24)
-        self.btn_popout.setToolTip("Mở không gian xem trước trong cửa sổ riêng biệt để phóng to tùy ý")
+        self.btn_popout.setToolTip("Cửa Sổ Riêng — Mở không gian xem trước trong cửa sổ riêng biệt để phóng to tùy ý")
         self.btn_popout.clicked.connect(self.popout_requested.emit)
         row2.addWidget(self.btn_popout)
 

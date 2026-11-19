@@ -1202,6 +1202,43 @@ def _setup_video_canvas_transform(self):
                     "🎬 Chưa chọn Video nguồn\nNhấn 'Chọn Video Nguồn...' ở cột trái để bắt đầu"
                 )
 
+            # 2c. Draw interactive overlay frames & resize handles (Masks, Logo, Watermark)
+            for m in (getattr(vc, 'masks_rel', None) or []):
+                try:
+                    mr = vc._getMaskRect(m)
+                    p.setPen(QPen(QColor("#F43F5E"), 1.5, Qt.PenStyle.DashLine))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawRect(mr)
+                    p.fillRect(QRectF(mr.right() - 8, mr.bottom() - 8, 8, 8), QColor("#F43F5E"))
+                except Exception:
+                    pass
+
+            if getattr(vc, 'logo_image', None) is not None and getattr(vc, 'logo_rel', None):
+                try:
+                    lr = vc._getMaskRect(vc.logo_rel)
+                    p.drawImage(lr, vc.logo_image)
+                    p.setPen(QPen(QColor("#38BDF8"), 1.2, Qt.PenStyle.DashLine))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawRect(lr)
+                    p.fillRect(QRectF(lr.right() - 8, lr.bottom() - 8, 8, 8), QColor("#38BDF8"))
+                except Exception:
+                    pass
+
+            if getattr(vc, 'watermark_text', '') and getattr(vc, 'wm_rel', None):
+                try:
+                    wr = vc._getMaskRect(vc.wm_rel)
+                    p.fillRect(wr, QColor(0, 0, 0, 115))
+                    p.setPen(QColor("#FFFFFF"))
+                    f_wm = QFont("Segoe UI", max(9, int(wr.height() * 0.45)), QFont.Weight.Bold)
+                    p.setFont(f_wm)
+                    p.drawText(wr, Qt.AlignmentFlag.AlignCenter, vc.watermark_text)
+                    p.setPen(QPen(QColor("#A78BFA"), 1.2, Qt.PenStyle.DashLine))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawRect(wr)
+                    p.fillRect(QRectF(wr.right() - 8, wr.bottom() - 8, 8, 8), QColor("#A78BFA"))
+                except Exception:
+                    pass
+
             # 3. Canvas Outer Border (Subtle Modern SaaS Gradient Border)
             from PyQt6.QtGui import QLinearGradient, QBrush
             b_grad = QLinearGradient(0, 0, W, H)
