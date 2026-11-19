@@ -6,9 +6,9 @@ Provides the 3-column AI Dubbing Studio workspace without any .pyc dependency.
 import os
 import threading
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
     QScrollArea, QStackedWidget, QListWidget, QFileDialog,
-    QDialog, QPlainTextEdit as QtPlainTextEdit, QPushButton, QSlider
+    QDialog, QPlainTextEdit as QtPlainTextEdit, QPushButton, QSlider, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF, QUrl
 from PyQt6.QtGui import QImage
@@ -326,11 +326,12 @@ class HomeInterface(QWidget):
 
         self.col1_scroll = QScrollArea(self.col1_widget)
         self.col1_scroll.setWidgetResizable(True)
+        self.col1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.col1_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.col1_container = QWidget()
         self.col1_layout = QVBoxLayout(self.col1_container)
-        self.col1_layout.setContentsMargins(12, 12, 12, 12)
-        self.col1_layout.setSpacing(9)
+        self.col1_layout.setContentsMargins(10, 8, 10, 8)
+        self.col1_layout.setSpacing(6)
 
         # Index 0 MUST be header label (home_interface.py styles itemAt(0))
         self.lbl_col1_header = QLabel("✦ CẤU HÌNH DỰ ÁN & GIỌNG ĐỌC AI", self.col1_container)
@@ -338,18 +339,26 @@ class HomeInterface(QWidget):
 
         # Video & Output selection
         self.btn_select_video = PrimaryPushButton(FIF.VIDEO, "Chọn Video Nguồn...", self.col1_container)
+        self.btn_select_video.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_select_video.setMinimumHeight(32)
         self.btn_select_video.clicked.connect(self._onSelectVideo)
         self.col1_layout.addWidget(self.btn_select_video)
 
         self.video_combo = ComboBox(self.col1_container)
+        self.video_combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.video_combo.setMinimumWidth(0)
         self.video_combo.addItem("Chưa có video nào được chọn", userData="")
         self.video_combo.currentIndexChanged.connect(self._onVideoChanged)
         self.col1_layout.addWidget(self.video_combo)
 
         out_row = QHBoxLayout()
+        out_row.setSpacing(6)
         self.line_output_path = LineEdit(self.col1_container)
+        self.line_output_path.setMinimumWidth(0)
         self.line_output_path.setText(get_config("output_dir", os.path.join(os.getcwd(), "Output")))
-        self.btn_select_output = PushButton(FIF.FOLDER, "Lưu...", self.col1_container)
+        self.btn_select_output = PushButton("Đổi...", self.col1_container)
+        self.btn_select_output.setToolTip("Chọn thư mục xuất file")
+        self.btn_select_output.setMinimumWidth(58)
         self.btn_select_output.clicked.connect(self._onSelectOutput)
         out_row.addWidget(self.line_output_path, 1)
         out_row.addWidget(self.btn_select_output)
@@ -357,9 +366,11 @@ class HomeInterface(QWidget):
 
         # Whisper Model & TTS Voice selectors
         lbl_stt = QLabel("Mô hình bóc băng (Whisper STT):", self.col1_container)
-        lbl_stt.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        lbl_stt.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
         self.col1_layout.addWidget(lbl_stt)
         self.combo_whisper = ComboBox(self.col1_container)
+        self.combo_whisper.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.combo_whisper.setMinimumWidth(0)
         for lbl_w, val_w in [
             ("Tiny (Siêu tốc)", "tiny"),
             ("Base (Nhanh)", "base"),
@@ -379,9 +390,11 @@ class HomeInterface(QWidget):
         self.col1_layout.addWidget(self.combo_whisper)
 
         lbl_voice = QLabel("Giọng đọc AI (Piper Local & TikTok SessionID):", self.col1_container)
-        lbl_voice.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        lbl_voice.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
         self.col1_layout.addWidget(lbl_voice)
         self.combo_voice = ComboBox(self.col1_container)
+        self.combo_voice.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.combo_voice.setMinimumWidth(0)
         for lbl_v, val_v in [
             ("Ban Mai (Nữ - Local Offline)", "piper:banmai"),
             ("Mạnh Dũng (Nam - Local Offline)", "piper:manhdung"),
@@ -437,40 +450,58 @@ class HomeInterface(QWidget):
         self.col1_layout.addWidget(self.tiktok_session_box)
         self._update_tiktok_session_visibility()
 
-        # Translation settings
+        # Translation settings (compact 1-row language + style)
         lbl_lang = QLabel("Ngôn ngữ dịch & Phong cách:", self.col1_container)
-        lbl_lang.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        lbl_lang.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
         self.col1_layout.addWidget(lbl_lang)
 
+        lang_row = QHBoxLayout()
+        lang_row.setSpacing(6)
         self.combo_target_lang = ComboBox(self.col1_container)
+        self.combo_target_lang.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.combo_target_lang.setMinimumWidth(0)
         self.combo_target_lang.addItems(["Tiếng Việt", "English", "中文", "日本語", "한국어"])
-        self.col1_layout.addWidget(self.combo_target_lang)
-
         self.combo_prompt = ComboBox(self.col1_container)
+        self.combo_prompt.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.combo_prompt.setMinimumWidth(0)
         self.combo_prompt.addItem("Mặc định", userData="Mặc định")
-        self.col1_layout.addWidget(self.combo_prompt)
+        lang_row.addWidget(self.combo_target_lang, 2)
+        lang_row.addWidget(self.combo_prompt, 3)
+        self.col1_layout.addLayout(lang_row)
 
         self.text_custom_prompt = PlainTextEdit(self.col1_container)
         self.text_custom_prompt.setPlaceholderText("Ghi chú phong cách dịch (tùy chọn)...")
-        self.text_custom_prompt.setMaximumHeight(65)
+        self.text_custom_prompt.setMaximumHeight(46)
         self.col1_layout.addWidget(self.text_custom_prompt)
 
-        # Pipeline step buttons (no FIF icon to prevent icon/text overlap with custom QSS)
+        # Pipeline step buttons in compact 2x2 grid
+        step_grid = QGridLayout()
+        step_grid.setSpacing(6)
         self.btn_step1 = PushButton("1. Bóc Băng", self.col1_container)
+        self.btn_step1.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_step1.setMinimumHeight(30)
         self.btn_step1.clicked.connect(self._onStep1Clicked)
-        self.col1_layout.addWidget(self.btn_step1)
 
         self.btn_step2 = PushButton("2. Dịch Phụ Đề", self.col1_container)
+        self.btn_step2.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_step2.setMinimumHeight(30)
         self.btn_step2.clicked.connect(self._onTranslateClicked)
-        self.col1_layout.addWidget(self.btn_step2)
 
         self.btn_step3 = PushButton("3. Tạo Giọng AI", self.col1_container)
+        self.btn_step3.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_step3.setMinimumHeight(30)
         self.btn_step3.clicked.connect(self._onVoiceClicked)
-        self.col1_layout.addWidget(self.btn_step3)
 
-        self.btn_step4 = PrimaryPushButton("4. Xuất Video 1080p", self.col1_container)
+        self.btn_step4 = PrimaryPushButton("4. Xuất Video", self.col1_container)
+        self.btn_step4.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_step4.setMinimumHeight(30)
         self.btn_step4.clicked.connect(self._onStep4Clicked)
-        self.col1_layout.addWidget(self.btn_step4)
+
+        step_grid.addWidget(self.btn_step1, 0, 0)
+        step_grid.addWidget(self.btn_step2, 0, 1)
+        step_grid.addWidget(self.btn_step3, 1, 0)
+        step_grid.addWidget(self.btn_step4, 1, 1)
+        self.col1_layout.addLayout(step_grid)
 
         self.run_group = QFrame(self.col1_container)
         full_col = QVBoxLayout(self.run_group)
@@ -761,7 +792,10 @@ class HomeInterface(QWidget):
             self.selected_videos = files
             self.video_combo.clear()
             for f in files:
-                self.video_combo.addItem(os.path.basename(f), userData=f)
+                name = os.path.basename(f)
+                short_name = name if len(name) <= 34 else f"{name[:24]}...{name[-7:]}"
+                self.video_combo.addItem(short_name, userData=f)
+            self.video_combo.setToolTip(os.path.basename(files[0]))
             self._preview_video_frame(files[0])
             self._appendLog(f"Đã nạp {len(files)} video.")
 
