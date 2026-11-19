@@ -33,6 +33,12 @@ def render_logic(
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     out_path = os.path.join(workspace_dir, f"HikariDub_{base_name}.mp4")
+    if os.path.exists(out_path):
+        try:
+            os.remove(out_path)
+        except OSError:
+            import time as _t
+            out_path = os.path.join(workspace_dir, f"HikariDub_{base_name}_{int(_t.time())}.mp4")
 
     if status_cb:
         status_cb("Đang bắt đầu xuất video...")
