@@ -158,6 +158,7 @@ class VideoCanvasWidget(QWidget):
         self.sub_rel = None
         self._canvas_transform = None
         self._drag_target = None  # ('mask', idx, mode) | ('logo', 0, mode) | ('wm', 0, mode)
+        self.selected_item = None
         self._drag_start = None
         self._drag_orig_rect = None
         self.setMouseTracking(True)
@@ -210,10 +211,12 @@ class VideoCanvasWidget(QWidget):
             hit = self._hit_test_overlay(pos.x(), pos.y())
             if hit:
                 self._drag_target = (hit[0], hit[1], hit[2])
+                self.selected_item = self._drag_target
                 self._drag_start = (pos.x(), pos.y())
                 self._drag_orig_rect = hit[3]
                 event.accept()
                 return
+            self.selected_item = None
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -253,6 +256,7 @@ class VideoCanvasWidget(QWidget):
     def mouseReleaseEvent(self, event):
         if self._drag_target:
             self._drag_target = None
+            self.selected_item = None
             self._drag_start = None
             self._drag_orig_rect = None
             self.saveConfig()
@@ -514,7 +518,7 @@ class HomeInterface(QWidget):
         self.col2_layout.addWidget(self.lbl_col2_header)
 
         self.video_frame = QFrame(self.col2_widget)
-        self.video_frame.setMinimumHeight(320)
+        self.video_frame.setMinimumHeight(220)
         self.video_frame.setStyleSheet("QFrame { background: #0B0F1A; border: 1px solid #1E293B; border-radius: 10px; }")
         vf_lay = QVBoxLayout(self.video_frame)
         vf_lay.setContentsMargins(0, 0, 0, 0)

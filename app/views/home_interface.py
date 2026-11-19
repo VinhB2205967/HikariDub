@@ -234,7 +234,7 @@ def _init_patched(self, parent=None):
 
         # Optimize Video Workspace & Canvas for MAXIMUM viewing area
         if hasattr(self, 'video_frame'):
-            self.video_frame.setMinimumHeight(380)
+            self.video_frame.setMinimumHeight(220)
             self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.video_frame.setStyleSheet("""
                 background: transparent;
@@ -1029,10 +1029,8 @@ def _setup_video_canvas_transform(self):
     def recalc_and_apply_canvas_size():
         t = getattr(vc, '_canvas_transform', None) or CanvasTransform()
         pad = 4
-        avail_w = max(100, vf.width() - pad * 2)
-        avail_h = max(100, vf.height() - pad * 2)
-        if avail_h < 300:
-            avail_h = 320
+        avail_w = max(120, vf.width() - pad * 2)
+        avail_h = max(120, vf.height() - pad * 2)
 
         cw_nom = float(t.canvas_w) if t.canvas_w > 0 else 1920.0
         ch_nom = float(t.canvas_h) if t.canvas_h > 0 else 1080.0
