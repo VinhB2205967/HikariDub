@@ -43,10 +43,39 @@ def render_logic(
     if status_cb:
         status_cb("Đang bắt đầu xuất video...")
 
+    from app.common.config_manager import get_config
+    cfg = dict(video_config or {})
+    orig_vol = float(cfg.get("orig_audio_volume", get_config("orig_audio_volume", 35) or 35)) / 100.0
+    voice_vol = float(cfg.get("voice_audio_volume", get_config("voice_audio_volume", 100) or 100)) / 100.0
+    orig_vol = max(0.0, min(2.0, orig_vol))
+    voice_vol = max(0.0, min(2.5, voice_vol))
+
+    # Optional separated BGM (instrumental) if vocal separation was run
+    bgm_path = str(cfg.get("bgm_path") or "").strip()
+    has_bgm_file = bool(bgm_path and os.path.exists(bgm_path) and os.path.getsize(bgm_path) > 100)
+
+    # Probe if input video actually has an audio stream
+    has_orig_stream = False
+    try:
+        probe_out = subprocess.run(
+            [ffmpeg_exe, "-i", video_path],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        ).stderr or ""
+        has_orig_stream = "Audio:" in probe_out
+    except Exception:
+        has_orig_stream = True
+
     cmd = [ffmpeg_exe, "-y", "-i", video_path]
-    has_audio = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 100)
-    if has_audio:
+    has_voice = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 100)
+    voice_idx = None
+    bgm_idx = None
+
+    if has_voice:
+        voice_idx = 1
         cmd.extend(["-i", audio_path])
+    if has_bgm_file:
+        bgm_idx = 2 if has_voice else 1
+        cmd.extend(["-i", bgm_path])
 
     vf_parts = []
     if srt_path and os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
@@ -54,19 +83,49 @@ def render_logic(
         vf_parts.append(f"subtitles='{esc_srt}'")
 
     # Optional watermark text overlay from video_config
-    wm_text = str((video_config or {}).get("watermark_text") or "").strip()
+    wm_text = str(cfg.get("watermark_text") or "").strip()
     if wm_text:
-        wm_rel = (video_config or {}).get("wm_rel") or [0.05, 0.05, 0.3, 0.08]
+        wm_rel = cfg.get("wm_rel") or [0.05, 0.05, 0.3, 0.08]
         wx = max(0.0, min(0.95, float(wm_rel[0])))
         wy = max(0.0, min(0.95, float(wm_rel[1])))
         safe_wm = wm_text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
         vf_parts.append(f"drawtext=text='{safe_wm}':fontcolor=white@0.85:fontsize=28:box=1:boxcolor=black@0.45:boxborderw=6:x=w*{wx:.4f}:y=h*{wy:.4f}")
 
-    if vf_parts:
-        cmd.extend(["-vf", ",".join(vf_parts)])
+    # Audio mixing: keep original video audio (or separated BGM) mixed with dubbed AI voice
+    use_orig_audio = (orig_vol > 0.01) and (has_bgm_file or has_orig_stream)
+    orig_ref = f"{bgm_idx}:a:0" if has_bgm_file else "0:a:0"
 
-    if has_audio:
-        cmd.extend(["-map", "0:v:0", "-map", "1:a:0", "-shortest"])
+    fc_parts = []
+    if vf_parts:
+        fc_parts.append(f"[0:v]{','.join(vf_parts)}[vout]")
+        v_map = "[vout]"
+    else:
+        v_map = "0:v:0"
+
+    a_map = None
+    shortest_flag = []
+    if has_voice and use_orig_audio:
+        fc_parts.append(
+            f"[{orig_ref}]volume={orig_vol:.2f}[a_bgm];"
+            f"[{voice_idx}:a:0]volume={voice_vol:.2f}[a_dub];"
+            f"[a_bgm][a_dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        )
+        a_map = "[aout]"
+    elif has_voice:
+        fc_parts.append(f"[{voice_idx}:a:0]volume={voice_vol:.2f}[aout]")
+        a_map = "[aout]"
+        shortest_flag = ["-shortest"]
+    elif use_orig_audio:
+        fc_parts.append(f"[{orig_ref}]volume={orig_vol:.2f}[aout]")
+        a_map = "[aout]"
+
+    if fc_parts:
+        cmd.extend(["-filter_complex", ";".join(fc_parts), "-map", v_map])
+        if a_map:
+            cmd.extend(["-map", a_map])
+        cmd.extend(shortest_flag)
+    elif a_map:
+        cmd.extend(["-map", v_map, "-map", a_map, *shortest_flag])
 
     cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out_path])
 
@@ -532,7 +591,7 @@ def render_logic_with_canvas(video_path, srt_path, audio_path, workspace_dir,
         def __init__(self, *args, **kwargs):
             try:
                 cmd = args[0] if args else kwargs.get('args')
-                if isinstance(cmd, list):
+                if isinstance(cmd, list) and '-filter_complex' not in cmd:
                     # Step 1: apply canvas transform
                     cmd = apply_canvas_transform_to_ffmpeg(cmd, video_path, video_config)
                     # Step 2: upgrade to 1080p/60fps

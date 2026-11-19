@@ -47,14 +47,21 @@ class TTSInterface(QWidget):
         self.line_session.setText(get_config("tiktok_session_id", "") or "")
         self.line_session.textChanged.connect(lambda t: set_config("tiktok_session_id", t.strip()))
         lay.addWidget(self.line_session)
+        self.combo_voice.currentIndexChanged.connect(self._update_session_vis)
+        self._update_session_vis()
 
         self.txt_input = PlainTextEdit(self)
         self.txt_input.setPlaceholderText("Nhập văn bản tiếng Việt để chuyển thành giọng nói...")
         lay.addWidget(self.txt_input, 1)
 
-        self.btn_synth = PrimaryPushButton(FIF.MICROPHONE, "Tạo & Nghe Thử Giọng Đọc", self)
+        self.btn_synth = PrimaryPushButton("🎙️ Tạo và Nghe Thử Giọng Đọc", self)
+        self.btn_synth.setMinimumHeight(38)
         self.btn_synth.clicked.connect(self._synthesize)
         lay.addWidget(self.btn_synth)
+
+    def _update_session_vis(self, *_):
+        vid = str(self.combo_voice.currentData() or "")
+        self.line_session.setVisible(vid.startswith("tiktok:"))
 
     def _synthesize(self):
         text = self.txt_input.toPlainText().strip()

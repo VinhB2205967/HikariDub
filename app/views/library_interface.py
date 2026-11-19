@@ -104,8 +104,8 @@ class LibraryInterface(QWidget):
         self.btn_refresh.clicked.connect(self.refresh_list)
         header.addWidget(self.btn_refresh)
 
-        self.btn_open_all = PrimaryPushButton(FIF.FOLDER, "Mở Thư Mục Xuất", self.col1_widget)
-        self.btn_open_all.setMinimumWidth(175)
+        self.btn_open_all = PrimaryPushButton("📂 Mở Thư Mục Xuất", self.col1_widget)
+        self.btn_open_all.setMinimumWidth(180)
         self.btn_open_all.setStyleSheet(f"""
             PrimaryPushButton, PushButton {{
                 background: {Gradients.BLUE_PURPLE};

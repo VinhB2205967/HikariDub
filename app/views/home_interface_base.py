@@ -15,7 +15,7 @@ from PyQt6.QtGui import QImage
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, ComboBox, LineEdit, PlainTextEdit,
-    ProgressBar, Pivot, InfoBar, InfoBarPosition, FluentIcon as FIF
+    ProgressBar, Pivot, CheckBox, InfoBar, InfoBarPosition, FluentIcon as FIF
 )
 
 from app.common.design_system import Colors
@@ -26,13 +26,15 @@ class _TranscribeWorker(QThread):
     progress = pyqtSignal(int)
     log = pyqtSignal(str)
     finished_srt = pyqtSignal(str)
+    finished_bgm = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, video_path: str, workspace_dir: str, model_size: str = "small", parent=None):
+    def __init__(self, video_path: str, workspace_dir: str, model_size: str = "small", vocal_sep: bool = False, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.workspace_dir = workspace_dir
         self.model_size = model_size
+        self.vocal_sep = bool(vocal_sep)
         self._cancel = threading.Event()
 
     def cancel(self):
@@ -42,23 +44,60 @@ class _TranscribeWorker(QThread):
         try:
             self.progress.emit(5)
             self.log.emit("⏳ Đang khởi tạo bộ bóc băng Faster-Whisper...")
+            import subprocess
+            import imageio_ffmpeg
             import pysrt
             import ctranslate2
             from faster_whisper import WhisperModel
+            from app.core.video_utils import get_safe_basename
 
-            os.makedirs(self.workspace_dir, exist_ok=True)
+            base = get_safe_basename(self.video_path)
+            proj_dir = os.path.join(self.workspace_dir, base)
+            data_dir = os.path.join(proj_dir, "Data")
+            os.makedirs(data_dir, exist_ok=True)
+
+            # Optional Vocal Separation (removes BGM/SFX before STT and saves clean BGM for export)
+            audio_for_stt = self.video_path
+            if self.vocal_sep:
+                try:
+                    from app.core.vocal_separator import separate_vocals_and_bgm
+                    vocals_wav, bgm_wav = separate_vocals_and_bgm(
+                        self.video_path, proj_dir, status_cb=lambda m: self.log.emit(str(m))
+                    )
+                    if vocals_wav and os.path.exists(vocals_wav):
+                        audio_for_stt = vocals_wav
+                    if bgm_wav and os.path.exists(bgm_wav):
+                        self.finished_bgm.emit(bgm_wav)
+                except Exception as sep_err:
+                    self.log.emit(f"⚠️ Lọc giọng lỗi ({sep_err}) → dùng âm thanh gốc.")
+
+            # Always normalize STT input to 16kHz mono PCM WAV with exact first_pts=0 alignment
+            synced_wav = os.path.join(data_dir, "stt_synced_16k.wav")
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            subprocess.run(
+                [
+                    ffmpeg_exe, "-y", "-i", audio_for_stt,
+                    "-vn", "-ac", "1", "-ar", "16000",
+                    "-af", "aresample=async=1:first_pts=0",
+                    synced_wav,
+                ],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            )
+            if os.path.exists(synced_wav) and os.path.getsize(synced_wav) > 1000:
+                audio_for_stt = synced_wav
+
             device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
             self.log.emit(f"Đang nạp Whisper ({self.model_size}, {device})...")
-            self.progress.emit(15)
+            self.progress.emit(25)
 
             model = WhisperModel(self.model_size, device=device, compute_type=compute_type)
-            self.log.emit("Đang bóc băng lời thoại (word-level timestamps chuẩn từng ms)...")
+            self.log.emit("Đang bóc băng lời thoại (khớp chuẩn thời gian lời nói)...")
             segments, _ = model.transcribe(
-                self.video_path,
+                audio_for_stt,
                 beam_size=5,
                 vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=250, speech_pad_ms=80),
+                vad_parameters=dict(min_silence_duration_ms=250, speech_pad_ms=60, threshold=0.45),
                 word_timestamps=True,
                 condition_on_previous_text=False,
             )
@@ -74,14 +113,21 @@ class _TranscribeWorker(QThread):
                 if not text:
                     continue
 
-                # Use exact word-level start/end timestamps so speech never drifts
                 words = getattr(seg, "words", None) or []
                 if words:
                     start_s = float(words[0].start)
                     end_s = float(words[-1].end)
+                    # Guard against leading SFX/music stretching words[0].start far before actual speech
+                    if len(words) >= 2 and (float(words[1].start) - start_s) > 1.2:
+                        start_s = max(start_s, float(words[1].start) - 0.35)
                 else:
                     start_s = float(seg.start)
                     end_s = float(seg.end)
+
+                # Sanity clamp: prevent a short sentence from spanning 8-12s of preceding silence/SFX
+                max_natural_dur = max(2.8, len(text) * 0.28)
+                if (end_s - start_s) > max_natural_dur + 1.5:
+                    start_s = max(start_s, end_s - max_natural_dur)
 
                 start_ms = max(prev_end_ms, int(round(start_s * 1000)))
                 end_ms = max(start_ms + 120, int(round(end_s * 1000)))
@@ -92,10 +138,6 @@ class _TranscribeWorker(QThread):
                 end = pysrt.SubRipTime.from_ordinal(end_ms)
                 subs.append(pysrt.SubRipItem(idx, start, end, text))
 
-            from app.core.video_utils import get_safe_basename
-            base = get_safe_basename(self.video_path)
-            data_dir = os.path.join(self.workspace_dir, base, "Data")
-            os.makedirs(data_dir, exist_ok=True)
             out_srt = os.path.join(data_dir, "temp_original.srt")
             subs.save(out_srt, encoding="utf-8")
             self.progress.emit(100)
@@ -144,12 +186,13 @@ class _RenderWorker(QThread):
     finished_video = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, video_path: str, srt_path: str, audio_path: str, workspace_dir: str, parent=None):
+    def __init__(self, video_path: str, srt_path: str, audio_path: str, workspace_dir: str, video_config: dict = None, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.srt_path = srt_path
         self.audio_path = audio_path
         self.workspace_dir = workspace_dir
+        self.video_config = dict(video_config or {})
         self._cancel = threading.Event()
 
     def cancel(self):
@@ -160,7 +203,7 @@ class _RenderWorker(QThread):
             from app.core.video_renderer import render_logic
             out_mp4 = render_logic(
                 self.video_path, self.srt_path, self.audio_path, self.workspace_dir,
-                lambda m: self.log.emit(str(m)), self._cancel, "premium", None
+                lambda m: self.log.emit(str(m)), self._cancel, "premium", self.video_config
             )
             self.progress.emit(100)
             if out_mp4 and os.path.exists(out_mp4):
@@ -336,6 +379,7 @@ class HomeInterface(QWidget):
         self._orig_srt_path = ""
         self._trans_srt_path = ""
         self._audio_path = ""
+        self._bgm_path = ""
         self._workers = []
         self._auto_running = False
 
@@ -491,6 +535,55 @@ class HomeInterface(QWidget):
         self.text_custom_prompt.setPlaceholderText("Ghi chú phong cách dịch (tùy chọn)...")
         self.text_custom_prompt.setMaximumHeight(46)
         self.col1_layout.addWidget(self.text_custom_prompt)
+
+        # Audio Mixing & Vocal Separation Controls
+        audio_box = QFrame(self.col1_container)
+        audio_box.setStyleSheet("QFrame { background: rgba(15, 23, 42, 0.55); border: 1px solid #1E2942; border-radius: 8px; }")
+        ab_lay = QVBoxLayout(audio_box)
+        ab_lay.setContentsMargins(8, 6, 8, 6)
+        ab_lay.setSpacing(5)
+
+        self.chk_vocal_sep = CheckBox("Lọc giọng (Tách lời / Giữ BGM)", audio_box)
+        self.chk_vocal_sep.setChecked(bool(get_config("vocal_sep_enabled", False)))
+        self.chk_vocal_sep.setToolTip("Dùng AI UVR-MDX-NET tách riêng lời thoại để bóc băng chuẩn hơn và giữ lại nhạc nền gốc khi xuất video")
+        self.chk_vocal_sep.stateChanged.connect(lambda _: set_config("vocal_sep_enabled", self.chk_vocal_sep.isChecked()))
+        ab_lay.addWidget(self.chk_vocal_sep)
+
+        orig_v_row = QHBoxLayout()
+        orig_v_row.setSpacing(6)
+        lbl_ov = QLabel("Âm gốc:", audio_box)
+        lbl_ov.setStyleSheet("color: #94A3B8; font-size: 11px; border: none;")
+        self.slider_orig_vol = QSlider(Qt.Orientation.Horizontal, audio_box)
+        self.slider_orig_vol.setRange(0, 100)
+        init_ov = int(get_config("orig_audio_volume", 35) or 35)
+        self.slider_orig_vol.setValue(init_ov)
+        self.lbl_orig_vol_val = QLabel(f"{init_ov}%", audio_box)
+        self.lbl_orig_vol_val.setFixedWidth(34)
+        self.lbl_orig_vol_val.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700; border: none;")
+        self.slider_orig_vol.valueChanged.connect(self._onOrigVolChanged)
+        orig_v_row.addWidget(lbl_ov)
+        orig_v_row.addWidget(self.slider_orig_vol, 1)
+        orig_v_row.addWidget(self.lbl_orig_vol_val)
+        ab_lay.addLayout(orig_v_row)
+
+        dub_v_row = QHBoxLayout()
+        dub_v_row.setSpacing(6)
+        lbl_dv = QLabel("Giọng AI:", audio_box)
+        lbl_dv.setStyleSheet("color: #94A3B8; font-size: 11px; border: none;")
+        self.slider_voice_vol = QSlider(Qt.Orientation.Horizontal, audio_box)
+        self.slider_voice_vol.setRange(50, 200)
+        init_dv = int(get_config("voice_audio_volume", 100) or 100)
+        self.slider_voice_vol.setValue(init_dv)
+        self.lbl_voice_vol_val = QLabel(f"{init_dv}%", audio_box)
+        self.lbl_voice_vol_val.setFixedWidth(34)
+        self.lbl_voice_vol_val.setStyleSheet("color: #A78BFA; font-size: 11px; font-weight: 700; border: none;")
+        self.slider_voice_vol.valueChanged.connect(self._onVoiceVolChanged)
+        dub_v_row.addWidget(lbl_dv)
+        dub_v_row.addWidget(self.slider_voice_vol, 1)
+        dub_v_row.addWidget(self.lbl_voice_vol_val)
+        ab_lay.addLayout(dub_v_row)
+
+        self.col1_layout.addWidget(audio_box)
 
         # Pipeline step buttons in compact 2x2 grid
         step_grid = QGridLayout()
@@ -976,14 +1069,25 @@ class HomeInterface(QWidget):
                 w.cancel()
         self._appendLog("Đã gửi yêu cầu hủy tác vụ.")
 
+    def _onOrigVolChanged(self, val: int):
+        self.lbl_orig_vol_val.setText(f"{val}%")
+        set_config("orig_audio_volume", int(val))
+
+    def _onVoiceVolChanged(self, val: int):
+        self.lbl_voice_vol_val.setText(f"{val}%")
+        set_config("voice_audio_volume", int(val))
+
     def _onStep1Clicked(self):
         vp = self.get_active_video_path()
         if not vp or not os.path.exists(vp):
             InfoBar.warning("Thiếu video", "Vui lòng chọn video nguồn trước.", parent=self, position=InfoBarPosition.TOP)
             return
-        w = _TranscribeWorker(vp, self.get_active_workspace(), get_config("whisper_model", "small"), self)
+        self._bgm_path = ""
+        use_sep = self.chk_vocal_sep.isChecked() if hasattr(self, "chk_vocal_sep") else False
+        w = _TranscribeWorker(vp, self.get_active_workspace(), get_config("whisper_model", "small"), vocal_sep=use_sep, parent=self)
         w.progress.connect(self.progress_bar.setValue)
         w.log.connect(self._appendLog)
+        w.finished_bgm.connect(lambda p: setattr(self, "_bgm_path", p))
         w.finished_srt.connect(self._onTranscribeFinished)
         w.error.connect(self._onTranscribeError)
         self._workers.append(w)
@@ -1045,7 +1149,12 @@ class HomeInterface(QWidget):
         if not vp or not os.path.exists(vp):
             InfoBar.warning("Thiếu video", "Vui lòng chọn video nguồn trước.", parent=self, position=InfoBarPosition.TOP)
             return
-        w = _RenderWorker(vp, self.get_current_srt_path(), self._audio_path, self.get_active_workspace(), self)
+        v_cfg = {
+            "orig_audio_volume": self.slider_orig_vol.value() if hasattr(self, "slider_orig_vol") else int(get_config("orig_audio_volume", 35) or 35),
+            "voice_audio_volume": self.slider_voice_vol.value() if hasattr(self, "slider_voice_vol") else int(get_config("voice_audio_volume", 100) or 100),
+            "bgm_path": self._bgm_path or "",
+        }
+        w = _RenderWorker(vp, self.get_current_srt_path(), self._audio_path, self.get_active_workspace(), video_config=v_cfg, parent=self)
         w.progress.connect(self.progress_bar.setValue)
         w.log.connect(self._appendLog)
         w.finished_video.connect(self._onRenderFinished)
