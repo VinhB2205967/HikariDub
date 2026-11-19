@@ -8,10 +8,11 @@ import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QStackedWidget, QListWidget, QFileDialog,
-    QDialog, QPlainTextEdit as QtPlainTextEdit, QPushButton
+    QDialog, QPlainTextEdit as QtPlainTextEdit, QPushButton, QSlider
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF, QUrl
 from PyQt6.QtGui import QImage
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, ComboBox, LineEdit, PlainTextEdit,
     ProgressBar, Pivot, InfoBar, InfoBarPosition, FluentIcon as FIF
@@ -403,6 +404,29 @@ class HomeInterface(QWidget):
         vf_lay.addWidget(self.video_canvas, 1)
         self.col2_layout.addWidget(self.video_frame, 3)
 
+        # Video Playback Controls Bar (Play/Pause, Seek, Timecode)
+        self._init_media_player()
+        play_bar = QFrame(self.col2_widget)
+        play_bar.setStyleSheet("QFrame { background: #11182B; border: 1px solid #1E2942; border-radius: 8px; }")
+        pb_lay = QHBoxLayout(play_bar)
+        pb_lay.setContentsMargins(8, 4, 8, 4)
+        pb_lay.setSpacing(8)
+        self.btn_play_pause = PushButton(FIF.PLAY, "Phát", play_bar)
+        self.btn_play_pause.setFixedHeight(28)
+        self.btn_play_pause.clicked.connect(self._toggle_play_pause)
+        self.lbl_time_cur = QLabel("00:00", play_bar)
+        self.lbl_time_cur.setStyleSheet("color: #CBD5E1; font-size: 11px; border: none;")
+        self.slider_seek = QSlider(Qt.Orientation.Horizontal, play_bar)
+        self.slider_seek.setRange(0, 0)
+        self.slider_seek.sliderMoved.connect(lambda pos: self.media_player.setPosition(pos))
+        self.lbl_time_dur = QLabel("00:00", play_bar)
+        self.lbl_time_dur.setStyleSheet("color: #94A3B8; font-size: 11px; border: none;")
+        pb_lay.addWidget(self.btn_play_pause)
+        pb_lay.addWidget(self.lbl_time_cur)
+        pb_lay.addWidget(self.slider_seek, 1)
+        pb_lay.addWidget(self.lbl_time_dur)
+        self.col2_layout.addWidget(play_bar)
+
         # Quick tools bar right under the video preview frame
         self.row2_widget = QWidget(self.col2_widget)
         self.row2_layout = QHBoxLayout(self.row2_widget)
@@ -485,9 +509,73 @@ class HomeInterface(QWidget):
     def get_current_srt_path(self) -> str:
         return self._trans_srt_path or self._orig_srt_path
 
+    def _init_media_player(self):
+        self.media_player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(0.85)
+        self.media_player.setAudioOutput(self.audio_output)
+        self.video_sink = QVideoSink(self)
+        self.media_player.setVideoSink(self.video_sink)
+        self.video_sink.videoFrameChanged.connect(self._on_video_frame)
+        self.media_player.positionChanged.connect(self._on_player_pos)
+        self.media_player.durationChanged.connect(self._on_player_dur)
+        self.media_player.playbackStateChanged.connect(self._on_player_state)
+
+    @staticmethod
+    def _fmt_ms(ms: int) -> str:
+        s = max(0, int(ms // 1000))
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    def _on_video_frame(self, frame):
+        try:
+            if frame and frame.isValid():
+                img = frame.toImage()
+                if not img.isNull():
+                    self.video_canvas.setImage(img)
+        except Exception:
+            pass
+
+    def _on_player_pos(self, pos: int):
+        if hasattr(self, "slider_seek") and not self.slider_seek.isSliderDown():
+            self.slider_seek.setValue(pos)
+        if hasattr(self, "lbl_time_cur"):
+            self.lbl_time_cur.setText(self._fmt_ms(pos))
+
+    def _on_player_dur(self, dur: int):
+        if hasattr(self, "slider_seek"):
+            self.slider_seek.setRange(0, max(0, dur))
+        if hasattr(self, "lbl_time_dur"):
+            self.lbl_time_dur.setText(self._fmt_ms(dur))
+
+    def _on_player_state(self, state):
+        if hasattr(self, "btn_play_pause"):
+            if state == QMediaPlayer.PlaybackState.PlayingState:
+                self.btn_play_pause.setText("Tạm dừng")
+                self.btn_play_pause.setIcon(FIF.PAUSE)
+            else:
+                self.btn_play_pause.setText("Phát")
+                self.btn_play_pause.setIcon(FIF.PLAY)
+
+    def _toggle_play_pause(self):
+        vp = self.get_active_video_path()
+        if not vp or not os.path.exists(vp):
+            InfoBar.warning("Chưa có video", "Vui lòng chọn video nguồn trước khi phát.", parent=self, position=InfoBarPosition.TOP)
+            return
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+        else:
+            if self.media_player.source().isEmpty():
+                self.media_player.setSource(QUrl.fromLocalFile(vp))
+            self.media_player.play()
+
     def _preview_video_frame(self, video_path: str):
         if not video_path or not os.path.exists(video_path):
             return
+        try:
+            self.media_player.stop()
+            self.media_player.setSource(QUrl.fromLocalFile(video_path))
+        except Exception:
+            pass
         try:
             import subprocess
             import tempfile

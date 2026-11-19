@@ -207,7 +207,7 @@ def _base_generate_audio_logic(
         if use_wav not in temp_files:
             temp_files.append(use_wav)
 
-        idx_in = len(inputs)
+        idx_in = len(mix_labels)
         inputs.extend(["-i", use_wav])
         lbl = f"[a{idx_in}]"
         filter_parts.append(f"[{idx_in}:a]adelay={start_ms}|{start_ms}{lbl}")
@@ -217,10 +217,18 @@ def _base_generate_audio_logic(
         return None
 
     out_audio = os.path.join(workspace_dir, "dubbed_voice.wav")
-    fc = ";".join(filter_parts) + f";{''.join(mix_labels)}amix=inputs={len(mix_labels)}:normalize=0[aout]"
-    cmd = [ffmpeg_exe, "-y", *inputs, "-filter_complex", fc, "-map", "[aout]", "-ar", "44100", "-ac", "2", out_audio]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-    return out_audio if os.path.exists(out_audio) else None
+    if len(mix_labels) == 1:
+        fc = filter_parts[0]
+        out_map = mix_labels[0]
+    else:
+        fc = ";".join(filter_parts) + f";{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=longest:normalize=0[aout]"
+        out_map = "[aout]"
+    cmd = [ffmpeg_exe, "-y", *inputs, "-filter_complex", fc, "-map", out_map, "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", out_audio]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if res.returncode != 0 or not os.path.exists(out_audio) or os.path.getsize(out_audio) < 100:
+        err_msg = res.stderr.decode("utf-8", errors="ignore")[-400:] if res.stderr else "unknown"
+        raise RuntimeError(f"FFmpeg ghép giọng đọc thất bại: {err_msg}")
+    return out_audio
 
 
 
