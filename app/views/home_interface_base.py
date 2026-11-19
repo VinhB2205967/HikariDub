@@ -53,17 +53,44 @@ class _TranscribeWorker(QThread):
             self.progress.emit(15)
 
             model = WhisperModel(self.model_size, device=device, compute_type=compute_type)
-            self.log.emit("Đang bóc băng lời thoại...")
-            segments, _ = model.transcribe(self.video_path, vad_filter=True)
+            self.log.emit("Đang bóc băng lời thoại (word-level timestamps chuẩn từng ms)...")
+            segments, _ = model.transcribe(
+                self.video_path,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=250, speech_pad_ms=80),
+                word_timestamps=True,
+                condition_on_previous_text=False,
+            )
 
             subs = pysrt.SubRipFile()
-            for idx, seg in enumerate(segments, 1):
+            prev_end_ms = 0
+            idx = 0
+            for seg in segments:
                 if self._cancel.is_set():
                     self.error.emit("Đã hủy bóc băng.")
                     return
-                start = pysrt.SubRipTime(seconds=seg.start)
-                end = pysrt.SubRipTime(seconds=seg.end)
-                subs.append(pysrt.SubRipItem(idx, start, end, seg.text.strip()))
+                text = (seg.text or "").strip()
+                if not text:
+                    continue
+
+                # Use exact word-level start/end timestamps so speech never drifts
+                words = getattr(seg, "words", None) or []
+                if words:
+                    start_s = float(words[0].start)
+                    end_s = float(words[-1].end)
+                else:
+                    start_s = float(seg.start)
+                    end_s = float(seg.end)
+
+                start_ms = max(prev_end_ms, int(round(start_s * 1000)))
+                end_ms = max(start_ms + 120, int(round(end_s * 1000)))
+                prev_end_ms = end_ms
+                idx += 1
+
+                start = pysrt.SubRipTime.from_ordinal(start_ms)
+                end = pysrt.SubRipTime.from_ordinal(end_ms)
+                subs.append(pysrt.SubRipItem(idx, start, end, text))
 
             from app.core.video_utils import get_safe_basename
             base = get_safe_basename(self.video_path)
