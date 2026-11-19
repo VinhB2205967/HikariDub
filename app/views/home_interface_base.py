@@ -507,7 +507,6 @@ class HomeInterface(QWidget):
         full_col = QVBoxLayout(self.run_group)
         full_col.setContentsMargins(8, 8, 8, 8)
         full_col.setSpacing(6)
-        from PyQt6.QtWidgets import QSizePolicy
         self.btn_start_full = PrimaryPushButton("▶ BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)", self.run_group)
         self.btn_start_full.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_start_full.setMinimumHeight(38)
@@ -659,7 +658,6 @@ class HomeInterface(QWidget):
         # Stacked full-width buttons so Vietnamese labels NEVER clip
         srt_btn_col = QVBoxLayout()
         srt_btn_col.setSpacing(6)
-        from PyQt6.QtWidgets import QSizePolicy
         self.btn_replace_all = PushButton("🔄 Thay thế tất cả", self.col3_widget)
         self.btn_replace_all.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_replace_all.setMinimumHeight(32)
