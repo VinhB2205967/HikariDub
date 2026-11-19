@@ -40,12 +40,14 @@ class _TranscribeWorker(QThread):
 
     def run(self):
         try:
+            self.progress.emit(5)
+            self.log.emit("⏳ Đang khởi tạo bộ bóc băng Faster-Whisper...")
             import pysrt
+            import ctranslate2
             from faster_whisper import WhisperModel
-            import torch
 
             os.makedirs(self.workspace_dir, exist_ok=True)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
             self.log.emit(f"Đang nạp Whisper ({self.model_size}, {device})...")
             self.progress.emit(15)
@@ -453,20 +455,20 @@ class HomeInterface(QWidget):
         self.text_custom_prompt.setMaximumHeight(65)
         self.col1_layout.addWidget(self.text_custom_prompt)
 
-        # Pipeline step buttons
-        self.btn_step1 = PushButton(FIF.MICROPHONE, "1. Bóc Băng (STT)", self.col1_container)
+        # Pipeline step buttons (no FIF icon to prevent icon/text overlap with custom QSS)
+        self.btn_step1 = PushButton("1. Bóc Băng", self.col1_container)
         self.btn_step1.clicked.connect(self._onStep1Clicked)
         self.col1_layout.addWidget(self.btn_step1)
 
-        self.btn_step2 = PushButton(FIF.LANGUAGE, "2. Dịch Kịch Bản", self.col1_container)
+        self.btn_step2 = PushButton("2. Dịch Phụ Đề", self.col1_container)
         self.btn_step2.clicked.connect(self._onTranslateClicked)
         self.col1_layout.addWidget(self.btn_step2)
 
-        self.btn_step3 = PushButton(FIF.VOLUME, "3. Tạo Giọng Đọc", self.col1_container)
+        self.btn_step3 = PushButton("3. Tạo Giọng AI", self.col1_container)
         self.btn_step3.clicked.connect(self._onVoiceClicked)
         self.col1_layout.addWidget(self.btn_step3)
 
-        self.btn_step4 = PrimaryPushButton(FIF.MOVIE, "4. Render Video", self.col1_container)
+        self.btn_step4 = PrimaryPushButton("4. Xuất Video 1080p", self.col1_container)
         self.btn_step4.clicked.connect(self._onStep4Clicked)
         self.col1_layout.addWidget(self.btn_step4)
 
@@ -475,7 +477,7 @@ class HomeInterface(QWidget):
         full_col.setContentsMargins(8, 8, 8, 8)
         full_col.setSpacing(6)
         from PyQt6.QtWidgets import QSizePolicy
-        self.btn_start_full = QPushButton("▶ BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)", self.run_group)
+        self.btn_start_full = PrimaryPushButton("▶ BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)", self.run_group)
         self.btn_start_full.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_start_full.setMinimumHeight(38)
         self.btn_start_full.setToolTip("BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG) — Chạy lần lượt STT → Dịch → TTS → Xuất Video")
