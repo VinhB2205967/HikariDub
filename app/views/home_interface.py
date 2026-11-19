@@ -31,8 +31,8 @@ def _init_patched(self, parent=None):
         self.col1_scroll = QScrollArea()
         self.col1_scroll.setObjectName("hikariCol1Scroll")
         self.col1_scroll.setWidgetResizable(True)
-        # Compact, sleek sidebar width so all buttons and labels fit without wasting space
-        settings_width = 330
+        # Ultra-compact sidebar width so center Video Preview gets maximum screen area
+        settings_width = 272
         self.col1_scroll.setFixedWidth(settings_width)
         self.col1_widget.setMinimumWidth(0)
         self.col1_widget.setMaximumWidth(settings_width)
@@ -172,7 +172,7 @@ def _init_patched(self, parent=None):
         splitter.addWidget(self.col1_container)
         splitter.addWidget(self.col2_widget)
         splitter.addWidget(self.col3_widget)
-        splitter.setSizes([settings_width, 740, 280])
+        splitter.setSizes([settings_width, 920, 250])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
@@ -343,7 +343,8 @@ def _init_patched(self, parent=None):
         self.line_output_path.setPlaceholderText("Đường dẫn lưu dự án đầu ra...")
         self.line_wm.setPlaceholderText("Nhãn bản quyền (VD: Hikari Tsukimi Studio)...")
 
-        self.btn_start_full.setText("▶ BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)")
+        self.btn_start_full.setText("▶ BẮT ĐẦU XỬ LÝ (TỰ ĐỘNG)")
+        self.btn_start_full.setToolTip("BẮT ĐẦU XỬ LÝ TOÀN BỘ (TỰ ĐỘNG)")
         self.btn_cancel.setText("⏹ HỦY TIẾN TRÌNH")
 
         self.btn_step1.setText("1. Bóc Băng")

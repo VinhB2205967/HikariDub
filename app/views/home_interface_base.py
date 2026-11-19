@@ -531,21 +531,21 @@ class HomeInterface(QWidget):
         # ── Column 2: Preview & Log ──
         self.col2_widget = QFrame(self)
         self.col2_layout = QVBoxLayout(self.col2_widget)
-        self.col2_layout.setContentsMargins(12, 12, 12, 12)
-        self.col2_layout.setSpacing(10)
+        self.col2_layout.setContentsMargins(8, 8, 8, 8)
+        self.col2_layout.setSpacing(6)
 
         # Index 0 MUST be header label (home_interface.py styles itemAt(0))
         self.lbl_col2_header = QLabel("🎬 VIDEO ĐẦU VÀO & KHÔNG GIAN XEM TRƯỚC", self.col2_widget)
         self.col2_layout.addWidget(self.lbl_col2_header)
 
         self.video_frame = QFrame(self.col2_widget)
-        self.video_frame.setMinimumHeight(220)
+        self.video_frame.setMinimumHeight(260)
         self.video_frame.setStyleSheet("QFrame { background: #0B0F1A; border: 1px solid #1E293B; border-radius: 10px; }")
         vf_lay = QVBoxLayout(self.video_frame)
         vf_lay.setContentsMargins(0, 0, 0, 0)
         self.video_canvas = VideoCanvasWidget(self.video_frame)
         vf_lay.addWidget(self.video_canvas, 1)
-        self.col2_layout.addWidget(self.video_frame, 3)
+        self.col2_layout.addWidget(self.video_frame, 10)
 
         # Video Playback Controls Bar (Play/Pause, Seek, Timecode)
         self._init_media_player()
@@ -605,14 +605,15 @@ class HomeInterface(QWidget):
 
         self.log_text_edit = PlainTextEdit(self.col2_widget)
         self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setMaximumHeight(82)
         self.log_text_edit.setPlaceholderText("Nhật ký xử lý AI...")
-        self.col2_layout.addWidget(self.log_text_edit, 1)
-        root.addWidget(self.col2_widget, 2)
+        self.col2_layout.addWidget(self.log_text_edit, 0)
+        root.addWidget(self.col2_widget, 3)
 
         # ── Column 3: Subtitles ──
         self.col3_widget = QFrame(self)
-        self.col3_widget.setMinimumWidth(300)
-        self.col3_widget.setMaximumWidth(380)
+        self.col3_widget.setMinimumWidth(240)
+        self.col3_widget.setMaximumWidth(290)
         self.col3_layout = QVBoxLayout(self.col3_widget)
         self.col3_layout.setContentsMargins(12, 12, 12, 12)
         self.col3_layout.setSpacing(8)
