@@ -612,7 +612,7 @@ if __name__ == '__main__':
             # Compact navigation width for elegant modern aesthetic
             if hasattr(self.navigationInterface, 'panel'):
                 try:
-                    self.navigationInterface.panel.setExpandWidth(220)
+                    self.navigationInterface.panel.setExpandWidth(185)
                 except Exception:
                     pass
 

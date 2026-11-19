@@ -31,9 +31,11 @@ def _init_patched(self, parent=None):
         self.col1_scroll = QScrollArea()
         self.col1_scroll.setObjectName("hikariCol1Scroll")
         self.col1_scroll.setWidgetResizable(True)
-        # Fixed, stable sidebar width designed so all buttons and labels fit perfectly without clipping or horizontal scroll
-        settings_width = 430
+        # Compact, sleek sidebar width so all buttons and labels fit without wasting space
+        settings_width = 330
         self.col1_scroll.setFixedWidth(settings_width)
+        self.col1_widget.setMinimumWidth(0)
+        self.col1_widget.setMaximumWidth(settings_width)
         self.col1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.col1_scroll.setStyleSheet("""
             QScrollArea#hikariCol1Scroll {

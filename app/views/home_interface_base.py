@@ -317,19 +317,10 @@ class HomeInterface(QWidget):
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(12)
 
-        # ── Column 1: Controls ──
+        # ── Column 1: Controls (direct layout; home_interface.py wraps col1_widget in col1_scroll) ──
         self.col1_widget = QFrame(self)
-        self.col1_widget.setMinimumWidth(330)
-        self.col1_widget.setMaximumWidth(390)
-        col1_outer = QVBoxLayout(self.col1_widget)
-        col1_outer.setContentsMargins(0, 0, 0, 0)
-
-        self.col1_scroll = QScrollArea(self.col1_widget)
-        self.col1_scroll.setWidgetResizable(True)
-        self.col1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.col1_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        self.col1_container = QWidget()
-        self.col1_layout = QVBoxLayout(self.col1_container)
+        self.col1_container = self.col1_widget
+        self.col1_layout = QVBoxLayout(self.col1_widget)
         self.col1_layout.setContentsMargins(10, 8, 10, 8)
         self.col1_layout.setSpacing(6)
 
@@ -535,8 +526,6 @@ class HomeInterface(QWidget):
         self.btn_apply_all.hide()
 
         self.col1_layout.addStretch(1)
-        self.col1_scroll.setWidget(self.col1_container)
-        col1_outer.addWidget(self.col1_scroll)
         root.addWidget(self.col1_widget)
 
         # ── Column 2: Preview & Log ──
